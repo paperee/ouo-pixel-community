@@ -1,0 +1,1 @@
+{"devDependencies": {"vite": "^6.0.3"}, "name": "pixel-web", "private": true, "scripts": {"build": "vite build", "dev": "vite --port 5173", "preview": "vite preview", "test": "node src/editor/paint.test.js"}, "type": "module", "version": "0.1.0"}

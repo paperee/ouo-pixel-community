@@ -1,0 +1,379 @@
+/* 社区指南页：像素贴纸风 + 键盘盖帽（只用设计 Token 颜色） */
+.wrap.guide {
+  max-width: 920px;
+}
+
+.guide {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.guide-title {
+  font-size: clamp(26px, 5vw, 36px);
+  margin: 0;
+}
+
+.guide-lead {
+  margin: -8px 0 0;
+  font-size: 16px;
+  color: var(--ink-soft);
+  line-height: 1.8;
+}
+
+.guide-tabs a.tool-btn {
+  text-decoration: none;
+  color: inherit;
+}
+
+.guide-tabs a.tool-btn.active {
+  color: #fff;
+}
+
+.guide-block p {
+  line-height: 1.9;
+  margin: 8px 0;
+}
+
+.guide-h3 {
+  font-size: 15px;
+  margin: 16px 0 4px;
+  border-left: 4px solid var(--gold);
+  padding-left: 10px;
+}
+
+/* 章节编号：小方块徽章 */
+.sec-num {
+  display: inline-block;
+  font-size: 13px;
+  background: var(--ink);
+  color: var(--gold);
+  padding: 2px 8px;
+  margin-right: 8px;
+  vertical-align: 2px;
+}
+
+/* 关键词高亮：粉底 + 下划硬线 */
+.px-mark {
+  background: var(--accent-tint);
+  color: var(--accent-deep);
+  font-weight: 700;
+  padding: 1px 6px;
+  border-bottom: 2px solid var(--accent);
+}
+
+/* ---- 站点信息 ---- */
+.fact-hero {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+}
+
+.fact-kicker {
+  font-family: var(--font-title);
+  font-size: 13px;
+  letter-spacing: 2px;
+  color: var(--accent-deep);
+  margin: 0 0 4px;
+}
+
+.fact-big {
+  font-family: var(--font-title);
+  font-size: clamp(18px, 3.4vw, 24px);
+  line-height: 1.6;
+  margin: 0 0 6px;
+}
+
+.fact-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 16px;
+}
+
+.fact-label {
+  font-family: var(--font-title);
+  font-size: 13px;
+  letter-spacing: 2px;
+  color: var(--ink-faint);
+  margin: 0 0 6px;
+}
+
+.fact-text {
+  font-size: 15px;
+  line-height: 1.8;
+  margin: 0;
+  letter-spacing: 0.3px;
+}
+
+.fact-text--lg {
+  font-size: 17px;
+}
+
+.fact-visit {
+  border-left: 6px solid var(--gold);
+}
+
+.chip {
+  display: inline-block;
+  font-family: var(--font-body);
+  font-size: 13px;
+  background: var(--field);
+  border: 2px solid var(--edge);
+  border-radius: var(--radius-sm);
+  padding: 2px 10px;
+  margin: 2px 4px 2px 0;
+  white-space: nowrap;
+}
+
+a.chip {
+  color: var(--ink);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+/* 作者名彩色下划线 */
+.au {
+  font-weight: 700;
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+
+.au-ee {
+  text-decoration-color: #44ff00;
+}
+
+.au-muse {
+  text-decoration-color: #0568e1;
+}
+
+.au-ds {
+  text-decoration-color: #5686fe;
+}
+
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.tag-row span {
+  font-family: var(--font-title);
+  font-size: 12px;
+  letter-spacing: 1px;
+  background: var(--ink);
+  color: #fff;
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+}
+
+.tag-row span:nth-child(2n) {
+  background: var(--accent);
+}
+
+/* ---- 站点特色 ---- */
+.feat-hero-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.feat-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  line-height: 1.8;
+  border-top: 6px solid var(--accent);
+}
+
+.feat-hero--1 {
+  border-top-color: var(--gold);
+  background: #fffdf4;
+}
+
+.feat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+}
+
+.feat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  line-height: 1.8;
+}
+
+.feat:nth-child(3n + 1) {
+  border-top: 6px solid var(--gold);
+}
+
+.feat:nth-child(3n + 2) {
+  border-top: 6px solid var(--accent);
+}
+
+.feat:nth-child(3n) {
+  border-top: 6px solid var(--ink);
+}
+
+.feat-no {
+  font-family: var(--font-title);
+  font-size: 13px;
+  letter-spacing: 2px;
+  color: var(--ink-faint);
+  margin: 0;
+}
+
+.feat b,
+.feat-hero b {
+  font-family: var(--font-title);
+  font-size: 17px;
+  letter-spacing: 1px;
+}
+
+.feat span,
+.feat-hero span {
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+
+/* ---- 使用说明 ---- */
+.manual-lead {
+  font-size: 16px;
+}
+
+/* 站内真实按钮展示：静态样子货 */
+.btn-demo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  background: var(--field);
+  border: 2px dashed var(--edge);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin: 8px 0 4px;
+}
+
+.btn-demo .px-btn,
+.btn-demo .tool-btn {
+  user-select: none;
+}
+
+.btn-demo .tool-btn.active {
+  color: #fff;
+}
+
+/* 像素键盘盖帽：米白键身 + 墨线边 + 硬阴影当键程 */
+.px-kbd {
+  display: inline-block;
+  min-width: 26px;
+  text-align: center;
+  font-family: var(--font-title);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 6px 8px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 3px 0 var(--ink);
+  vertical-align: 2px;
+  white-space: nowrap;
+}
+
+.key-combo {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.key-plus {
+  color: var(--ink-faint);
+  font-weight: 700;
+}
+
+/* 快捷键分组：卡片宽度跟内容走，窄组不撑宽 */
+.key-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 8px 0;
+}
+
+.key-group {
+  flex: 0 1 auto;
+  width: fit-content;
+  max-width: 100%;
+  background: var(--field);
+  border: 2px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.key-group h4 {
+  font-family: var(--font-title);
+  font-size: 13px;
+  letter-spacing: 1px;
+  margin: 0 0 12px;
+}
+
+.key-where {
+  display: inline-block;
+  background: var(--ink);
+  color: #fff;
+  padding: 2px 8px;
+  margin-right: 8px;
+}
+
+.key-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.key-list li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 14px;
+}
+
+.key-tip {
+  flex-basis: 100%;
+  color: var(--ink-faint);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.guide-pager {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.guide-pager a.px-btn {
+  text-decoration: none;
+}
+
+@media (max-width: 640px) {
+  .fact-grid,
+  .feat-hero-row {
+    grid-template-columns: 1fr;
+  }
+  .feat-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .key-group {
+    flex-basis: 100%;
+    width: 100%;
+  }
+}

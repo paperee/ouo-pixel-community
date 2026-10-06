@@ -1,0 +1,815 @@
+/* 编辑器样式：左工具条 + 中间画布 + 右侧边栏 */
+.ed {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ed-tools {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  background: var(--paper);
+  border: var(--border-w) solid var(--edge);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-hard-sm);
+  padding: 10px 12px;
+}
+
+.tool-btn {
+  font-family: var(--font-title);
+  font-size: 14px;
+  font-weight: 700;
+  padding: 6px 12px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  cursor: pointer;
+}
+
+.tool-btn:hover {
+  background: var(--line);
+}
+
+.tool-btn.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+}
+
+.px-ic {
+  width: 15px;
+  height: 15px;
+  display: block;
+  flex-shrink: 0;
+}
+
+.icon-row {
+  gap: 6px;
+}
+
+.tool-btn.active {
+  background: var(--accent);
+  border-color: var(--accent-deep);
+  color: #fff;
+}
+
+.tool-sep {
+  width: 2px;
+  align-self: stretch;
+  background: var(--line);
+  flex-shrink: 0;
+}
+
+/* 横向浅色分割线（左轨文字按钮分组用） */
+.tool-sep-h {
+  flex: 1 1 100%;
+  height: 2px;
+  background: var(--line);
+}
+
+.tool-lab {
+  font-family: var(--font-title);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.draw-rail .tool-lab {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.draw-rail .tool-lab input[type="range"] {
+  width: 100%;
+}
+
+.tool-lab input[type="range"] {
+  width: 80px;
+  accent-color: var(--cherry);
+}
+
+.tool-lab input[type="color"] {
+  width: 34px;
+  height: 30px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.tool-lab input[type="number"] {
+  width: 56px;
+}
+
+.ed-main {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.ed-stage {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  max-height: 78vh;
+  border: var(--border-w) solid var(--edge);
+  border-radius: var(--radius);
+  background: var(--paper);
+  box-shadow: var(--shadow-hard);
+  display: flex;
+  align-items: safe center;
+  justify-content: safe center;
+  padding: 20px;
+}
+
+.ed-canvasbox {
+  position: relative;
+  line-height: 0;
+  margin: auto; /* flex 居中 + 溢出时仍能从 0 开始滚动（纯 justify-center 会吞掉左半） */
+}
+
+.ed-canvasbox canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none; /* 预览层只负责显示，事件穿透到下面的 view */
+}
+
+.ed-canvasbox canvas:first-child {
+  position: relative;
+  pointer-events: auto;
+  touch-action: none; /* 触屏落笔不滚动 */
+}
+
+.ed-side {
+  width: 210px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ed-mini {
+  image-rendering: pixelated;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 0 / 12px 12px;
+  max-width: 100%;
+  display: block;
+}
+
+/* 实际像素预览拖拉角标 */
+.mini-wrap {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.mini-grip {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 16px;
+  height: 16px;
+  background:
+    repeating-linear-gradient(135deg, var(--ink) 0 2px, var(--paper) 2px 4px);
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
+.swatches {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.swatch {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  padding: 0;
+}
+
+.swatch.active {
+  outline: 2px solid var(--cherry);
+  outline-offset: 1px;
+}
+
+.ed-palette-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* /draw 三栏绘画布局：左工具轨 + 中画布 + 右面板（无网页边距） */
+.draw-page {
+  padding: clamp(8px, 2vw, 14px);
+  padding-left: max(clamp(8px, 2vw, 14px), env(safe-area-inset-left));
+  padding-right: max(clamp(8px, 2vw, 14px), env(safe-area-inset-right));
+  padding-bottom: max(clamp(8px, 2vw, 14px), env(safe-area-inset-bottom));
+}
+
+.draw-app {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  height: calc(100vh - 140px);
+  height: calc(100dvh - 140px);
+  min-height: 560px;
+}
+
+.draw-rail {
+  width: 184px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.draw-rail .ribbon-row {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.draw-rail .tool-btn {
+  flex: 1 1 26%;
+  padding: 6px 4px;
+}
+
+/* 工具 / 选区：图标每行 2 个 */
+.draw-rail .pair .tool-btn {
+  flex: 1 1 40%;
+}
+
+/* 撤销重做并排 + 其他工具折叠 */
+.tool-duo {
+  display: flex;
+  gap: 8px;
+  flex: 1 1 100%;
+}
+
+.tool-duo .icon-btn {
+  flex: 1;
+}
+
+.more-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 100%;
+}
+.draw-rail .tool-btn.wide {
+  flex: 1 1 100%;
+}
+
+.draw-rail .ribbon-row {
+  gap: 8px;
+}
+
+.draw-rail .tool-lab {
+  flex: 1 1 100%;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.draw-rail .tool-lab input[type="range"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.draw-center {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.draw-center .ed-stage {
+  flex: 1;
+  max-height: none;
+  min-height: 0;
+}
+
+.draw-status {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  background: var(--paper);
+  border: var(--border-w) solid var(--edge);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-hard-sm);
+  padding: 6px 12px;
+}
+
+.draw-status .ribbon-cap {
+  display: none;
+}
+
+.draw-status .ribbon-group {
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  flex-direction: row;
+}
+
+.draw-status a.tool-btn {
+  text-decoration: none;
+  color: var(--ink);
+  display: inline-block;
+}
+
+.draw-app .ed-side {
+  width: 224px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 8px;
+}
+
+/* 历史版本行：下拉占满剩余宽度、与按钮同行对齐（弹层已提到 body，不会被侧栏裁剪） */
+[data-ed-vers-row] .ps-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+[data-ed-vers-row] .ps-btn {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+/* 右栏与左栏同疏密：卡片内边距收紧 */
+.draw-app .ed-side .px-card {
+  padding: 14px;
+}
+
+/* 色轮 */
+.wheel-wrap {
+  position: relative;
+  width: min(180px, 64vw);
+  aspect-ratio: 1;
+  margin: 2px auto;
+}
+
+.wheel-wrap canvas {
+  width: 100%;
+  height: 100%;
+  border: var(--border-w) solid var(--ink);
+  border-radius: 50%;
+  cursor: crosshair;
+  touch-action: none;
+  background:
+    repeating-conic-gradient(#cfcfcf 0 25%, #fff 0 50%) 0 0 / 16px 16px;
+}
+
+.wheel-marker {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border: 2px solid #fff;
+  outline: 2px solid var(--ink);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+/* hex 下划线输入 + 与明度同行 */
+.hex-row {
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+.hex-row .tool-lab {
+  flex: 1;
+  min-width: 0;
+}
+
+.hex-row .tool-lab input[type="range"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.underline-input {
+  width: 84px;
+  flex-shrink: 0;
+  font-family: monospace;
+  font-size: 13px;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid var(--ink);
+  border-radius: 0;
+  padding: 4px 2px;
+  outline: none;
+}
+
+.underline-input:focus {
+  border-bottom-color: var(--accent);
+}
+
+/* 图层按钮 2 行 x 3 列 */
+.ed-side .icon-row .tool-btn {
+  flex: 1 1 28%;
+}
+
+/* 预设色盘下拉 */
+.pack-sel {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 新建弹窗：背景色块 + 迷你色轮 + 数字框 */
+.mswatch {
+  min-width: 0;
+  padding: 6px 10px;
+}
+
+[data-mbgpresets] {
+  flex-wrap: nowrap;
+}
+
+[data-mbgpresets] .hex-input {
+  width: 96px;
+  padding: 6px 10px;
+  flex-shrink: 0;
+}
+
+.mswatch.active {
+  outline: 2px solid var(--accent-deep);
+  outline-offset: 1px;
+  color: inherit; /* 背景预设块选中只描边，字色不动 */
+}
+
+.mcolor-row {
+  align-items: center;
+}
+
+.mini-wheel-wrap canvas {
+  width: 120px;
+  height: 120px;
+  border: var(--border-w) solid var(--ink);
+  border-radius: 50%;
+  cursor: crosshair;
+  touch-action: none;
+  display: block;
+  background:
+    repeating-conic-gradient(#cfcfcf 0 25%, #fff 0 50%) 0 0 / 12px 12px;
+}
+
+.num-input {
+  width: 84px;
+  padding: 6px 10px;
+}
+
+/* 统一样式弹窗（确认/提示/输入，盖在新建弹窗之上） */
+.dlg-backdrop {
+  z-index: 60;
+}
+
+.dlg {
+  width: min(360px, 92vw);
+}
+
+.dlg p {
+  margin: 0;
+  overflow-wrap: break-word;
+}
+
+.dlg .px-input {
+  width: 100%;
+}
+
+/* 抽屉开关（状态条里的“面板”组）：桌面端隐藏，窄屏按阶段出现 */
+.draw-status .status-group.drawer-btns {
+  display: none;
+}
+/* 抽屉内收起按钮：打开后状态条开关被自家遮罩盖住，抽屉里必须有自己的关闭入口 */
+.drawer-close {
+  display: none;
+}
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(43, 43, 43, 0.45);
+  z-index: 44; /* 弹窗遮罩（50/60）、下拉（45）天然在其上，不用特殊处理 */
+}
+.drawer-btn-rail {
+  display: none;
+}
+
+/* 抽屉停稳后：自定义浮动轨道会被贴边挤出视口，改用原生细滚动条做滚动提示。
+   注意用 .settled 而不用 .open——原生滚动条不跟随 transform 位移，开关过渡中显示会定格滞后 */
+.draw-app .ed-side.settled,
+.draw-rail.settled {
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) transparent;
+}
+.draw-app .ed-side.settled::-webkit-scrollbar,
+.draw-rail.settled::-webkit-scrollbar {
+  display: block;
+  width: 8px;
+}
+.draw-app .ed-side.settled::-webkit-scrollbar-thumb,
+.draw-rail.settled::-webkit-scrollbar-thumb {
+  background: var(--accent);
+  border: 2px solid var(--edge);
+}
+
+/* 第一阶段（≤1080px）：三栏摆不下 → 右栏变右侧抽屉，保留左轨 + 主画布（与桌面同布局） */
+@media (max-width: 1080px) {
+  .draw-app .ed-side {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(280px, 88vw);
+    z-index: 46;
+    overflow-y: auto;
+    background: var(--bg);
+    border-left: var(--border-w) solid var(--edge);
+    box-shadow: -4px 0 0 rgba(87, 80, 70, 0.14);
+    padding: 12px;
+    padding-top: max(12px, env(safe-area-inset-top));
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    transform: translateX(105%);
+    visibility: hidden;
+    transition: transform 0.18s ease-out, visibility 0s 0.18s;
+  }
+  .draw-app .ed-side.open {
+    transform: none;
+    visibility: visible;
+    transition: transform 0.18s ease-out;
+  }
+  .draw-status .status-group.drawer-btns {
+    display: flex;
+  }
+  .draw-app .ed-side .drawer-close {
+    display: block;
+    flex: none;
+    width: 100%;
+  }
+}
+
+/* 第二阶段（≤700px）：状态条按分隔线分组换行（竖线变整行横线，避免换行时落单） */
+@media (max-width: 700px) {
+  .draw-status > .tool-sep {
+    flex: 1 1 100%;
+    width: auto;
+    height: 2px;
+  }
+}
+
+/* 第二阶段（≤700px）：左轨 + 主画布也摆不下 → 左轨也变左侧抽屉，主画布独占 */
+@media (max-width: 700px) {
+  .draw-rail {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 46;
+    overflow-y: auto;
+    background: var(--bg);
+    border-right: var(--border-w) solid var(--edge);
+    box-shadow: 4px 0 0 rgba(87, 80, 70, 0.14);
+    padding: 10px;
+    padding-top: max(10px, env(safe-area-inset-top));
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+    transform: translateX(-105%);
+    visibility: hidden;
+    transition: transform 0.18s ease-out, visibility 0s 0.18s;
+  }
+  .draw-rail.open {
+    transform: none;
+    visibility: visible;
+    transition: transform 0.18s ease-out;
+  }
+  .drawer-btn-rail {
+    display: inline-block;
+  }
+  .draw-rail .drawer-close {
+    display: block;
+    flex: none;
+    width: 100%;
+  }
+}
+
+/* 小手机：画布区边距再收一档，触屏按钮至少 44px 高 */
+@media (max-width: 500px) {
+  .draw-center .ed-stage {
+    max-height: 52vh;
+    padding: 8px;
+  }
+  .draw-status {
+    padding: 6px 8px;
+    gap: 8px;
+  }
+}
+@media (pointer: coarse) {
+  .draw-rail .tool-btn,
+  .ed-side .tool-btn {
+    min-height: 44px;
+  }
+}
+
+/* Win11 画图式分组 ribbon（左轨内纵向时自动变列） */
+.ed-ribbon {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+
+.ribbon-group {
+  background: var(--paper);
+  border: var(--border-w) solid var(--edge);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-hard-sm);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ribbon-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  flex: 1;
+}
+
+.ribbon-cap {
+  font-family: var(--font-pixel);
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--ink-soft);
+  text-align: center;
+  border-top: 2px solid var(--line);
+  padding-top: 2px;
+  margin-top: 4px;
+}
+
+.ed-ribbon select {
+  font-family: var(--font-title);
+  font-size: 14px;
+  font-weight: 700;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background-color: var(--field);
+  padding: 5px 26px 5px 8px;
+}
+
+.draw-app select {
+  font-family: var(--font-title);
+  font-size: 14px;
+  font-weight: 700;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background-color: var(--field);
+  padding: 5px 26px 5px 8px;
+}
+
+.ed-ribbon a.tool-btn {
+  text-decoration: none;
+  color: var(--ink);
+  display: inline-block;
+}
+
+.ed-side a.tool-btn {
+  text-decoration: none;
+  color: var(--ink);
+  display: inline-block;
+}
+
+.ed-ribbon b[data-zoomlab] {
+  font-family: var(--font-pixel);
+  font-size: 14px;
+  min-width: 52px;
+  text-align: center;
+}
+
+/* 新建弹窗 */
+.modal-backdrop {
+  position: fixed;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(43, 43, 43, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.modal-backdrop[hidden] {
+  display: none;
+}
+
+.modal {
+  width: min(440px, 90vw);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modal h2 {
+  margin: 0;
+}
+
+.modal input[type="radio"] {
+  accent-color: var(--cherry);
+  width: 16px;
+  height: 16px;
+}
+
+.modal input[type="color"] {
+  margin-left: 8px;
+}
+
+.ed select {
+  font-family: var(--font-title);
+  font-size: 14px;
+  font-weight: 700;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background-color: var(--field);
+  padding: 5px 26px 5px 8px;
+}
+
+.layers {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.layer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  border: 2px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
+  cursor: pointer;
+}
+
+.layer.on {
+  border-color: var(--accent-deep);
+  background: var(--accent-tint);
+}
+
+/* 拖动排序落点指示：上沿/下沿一条粉线 */
+.layer.drop-before {
+  box-shadow: 0 -3px 0 var(--accent-deep);
+}
+.layer.drop-after {
+  box-shadow: 0 3px 0 var(--accent-deep);
+}
+.layer[draggable="true"] {
+  cursor: grab;
+}
+
+.layer canvas {
+  width: 40px;
+  height: 40px;
+  image-rendering: pixelated;
+  border: 2px solid var(--edge);
+  border-radius: var(--radius-sm);
+  background: repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 0 / 10px 10px;
+  flex-shrink: 0;
+}
+
+.layer .tool-btn {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.layer-name {
+  font-size: 13px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

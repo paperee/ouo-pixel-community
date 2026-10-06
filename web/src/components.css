@@ -1,0 +1,154 @@
+/* 通用组件：按钮 / 徽章 / 卡片 / 输入框（makebead 式：直角、无渐变、颜色反转做反馈） */
+.px-btn {
+  font-family: var(--font-title);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 1px;
+  padding: 10px 22px;
+  border: var(--border-w) solid var(--ink);
+  border-radius: var(--radius);
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  max-width: 100%;
+}
+
+.px-btn:hover {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.px-btn:active {
+  background: var(--accent);
+  border-color: var(--accent-deep);
+  color: #fff;
+}
+
+/* 主按钮：珊瑚粉实心 */
+.px-btn--cherry {
+  background: var(--accent);
+  border-color: var(--accent-deep);
+  color: #fff;
+}
+.px-btn--cherry:hover {
+  background: var(--accent-deep);
+  border-color: var(--accent-deep);
+  color: #fff;
+}
+
+/* 金：导航 CTA 等极少点缀 */
+.px-btn--mint {
+  background: var(--gold);
+  border-color: var(--ink);
+  color: var(--ink);
+}
+.px-btn--mint:hover {
+  background: var(--gold);
+  border-color: var(--ink);
+  color: var(--ink);
+  filter: brightness(0.95);
+}
+
+/* 幽灵粉：白底粉边粉字 */
+.px-btn--lemon {
+  background: var(--paper);
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+.px-btn--lemon:hover {
+  background: var(--accent-tint);
+  border-color: var(--accent-deep);
+  color: var(--accent-deep);
+}
+
+/* 墨：深色实心 */
+.px-btn--grape {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+.px-btn--grape:hover {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--gold);
+}
+
+.px-btn--sky {
+  background: var(--paper);
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+/* 浅色：删除等低风险次要操作 */
+.px-btn--pale {
+  background: var(--paper);
+  border-color: var(--edge);
+  color: var(--ink-soft);
+}
+.px-btn--pale:hover {
+  background: var(--paper);
+  border-color: var(--ink-soft);
+  color: var(--ink);
+}
+
+.px-btn--sm {
+  font-size: 13px;
+  padding: 6px 14px;
+}
+
+.px-btn.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 8px;
+  min-width: 32px;
+}
+
+.px-badge {
+  display: inline-block;
+  font-family: var(--font-title);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 3px 12px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius);
+  background: var(--gold);
+}
+
+.px-card {
+  background: var(--paper);
+  border: var(--border-w) solid var(--edge);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-hard);
+  padding: 20px;
+}
+
+.px-input {
+  font-family: var(--font-body);
+  font-size: 15px;
+  padding: 10px 14px;
+  border: var(--border-w) solid var(--edge);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+  color: var(--ink);
+  outline: none;
+}
+
+.px-input:focus {
+  border-color: var(--accent);
+}
+
+.px-title {
+  font-family: var(--font-title);
+  font-weight: 900;
+  letter-spacing: 1px;
+}
+
+.px-title--sub {
+  font-size: 20px;
+  border-left: 4px solid var(--accent);
+  padding-left: 10px;
+  letter-spacing: 1px;
+}

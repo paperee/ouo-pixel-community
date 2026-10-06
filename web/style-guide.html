@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>设计走查 · 像素画社区</title>
+    <link rel="stylesheet" href="/src/style.css" />
+    <style>
+      .guide { max-width: 760px; margin: 0 auto; padding: 40px 20px 80px; }
+      .guide section { margin-bottom: 36px; }
+      .swatches { display: flex; gap: 12px; flex-wrap: wrap; }
+      .swatch {
+        width: 96px; height: 96px; border: 3px solid var(--ink);
+        border-radius: var(--radius-sm); display: flex;
+        align-items: flex-end; justify-content: center;
+        font-size: 12px; font-weight: 700; padding-bottom: 6px;
+      }
+      .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    </style>
+  </head>
+  <body>
+    <main class="guide">
+      <h1 class="px-title">设计走查板</h1>
+      <p>亮色多巴胺 · 怀旧贴纸风 · 简约。编辑器画布区保持中性灰，不用主题色。</p>
+
+      <section>
+        <h2 class="px-title">色板</h2>
+        <div class="swatches">
+          <div class="swatch" style="background: #fff9f0">米白底</div>
+          <div class="swatch" style="background: #ff4d6d; color: #fff">樱桃红</div>
+          <div class="swatch" style="background: #8b5cf6; color: #fff">葡萄紫</div>
+          <div class="swatch" style="background: #ffc93c">柠檬黄</div>
+          <div class="swatch" style="background: #3ed598">薄荷绿</div>
+          <div class="swatch" style="background: #38bdf8">天空蓝</div>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="px-title">按钮</h2>
+        <div class="row">
+          <button class="px-btn">默认</button>
+          <button class="px-btn px-btn--cherry">开始作画</button>
+          <button class="px-btn px-btn--grape">发布作品</button>
+          <button class="px-btn px-btn--lemon">保存草稿</button>
+          <button class="px-btn px-btn--mint">点赞</button>
+          <button class="px-btn px-btn--sky">评论</button>
+        </div>
+      </section>
+
+      <section>
+        <h2 class="px-title">徽章 / 卡片 / 输入</h2>
+        <div class="row" style="margin-bottom: 16px">
+          <span class="px-badge">本周命题 · 32×32 的早餐</span>
+          <span class="px-badge" style="background: var(--mint)">CC-BY-NC</span>
+          <span class="px-badge" style="background: var(--sky); color: #fff">精选</span>
+        </div>
+        <div class="px-card" style="margin-bottom: 16px">
+          作品卡示例：封面图 + 标题 + 浏览 / 点赞 / 评论三元数据。
+        </div>
+        <div class="row">
+          <input class="px-input" placeholder="给作品起个名字…" />
+          <button class="px-btn px-btn--cherry">发布</button>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

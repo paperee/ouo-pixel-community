@@ -1,0 +1,51 @@
+/* 设计 Token：makebead 式像素复古——奶油方格纸 + 珊瑚粉单强调 + 硬描边。只此一份颜色真相源。 */
+@font-face {
+  font-family: "FusionPixel";
+  src: url("/fonts/fusion-12px-latin.woff2") format("woff2");
+  font-weight: 400 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "FusionPixel";
+  src: url("/fonts/fusion-12px-zh.woff2") format("woff2");
+  font-weight: 400 700;
+  font-display: swap;
+}
+
+:root {
+  /* 底色：奶油米白 + 方格纸（方格在 style.css body 上铺） */
+  --bg: #faf6ea;
+  --paper: #ffffff;
+  --field: #f5efdd;
+  /* 文字：暖灰，不用纯黑；描边分两档：小控件用墨，大面板用浅暖边 */
+  --ink: #575046;
+  --edge: #dcd2bf;
+  --ink-soft: #6f675c;
+  --ink-faint: #9a9184;
+  --line: #e7dfce;
+
+  /* 单强调色：珊瑚粉（主）+ 金（极少点缀） */
+  --accent: #f2556e;
+  --accent-deep: #de3f59;
+  --accent-tint: #fdeff1;
+  --gold: #f4c33f;
+
+  /* 旧名别名：历史类名/代码仍在用，值已收敛到新色板 */
+  --cherry: #f2556e;
+  --lemon: #f4c33f;
+  --sky: #4a90d9;
+  --grape: #8b5cf6;
+  --mint: #3ed598;
+
+  /* 像素贴纸风：零圆角 + 2px 硬描边 + 偏移硬阴影（无模糊） */
+  --border-w: 2px;
+  --radius: 2px;
+  --radius-sm: 2px;
+  --shadow-hard: 4px 4px 0 rgba(87, 80, 70, 0.14);
+  --shadow-hard-sm: 2px 2px 0 rgba(87, 80, 70, 0.16);
+
+  /* 字体：标题/按钮/标签用点阵像素体；正文保持系统字体易读 */
+  --font-pixel: "FusionPixel", "PingFang SC", "Microsoft YaHei", monospace;
+  --font-title: var(--font-pixel);
+  --font-body: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+}

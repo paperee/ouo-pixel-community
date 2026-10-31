@@ -699,9 +699,28 @@ textarea.px-input {
 }
 
 .art-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 16px;
+  --art-gap: 16px;
+  --art-col-min: 200px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--art-gap);
+}
+
+.art-grid-col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--art-gap);
+}
+
+/* 空状态 / 加载提示仍占满整行 */
+.art-grid > .empty-wall,
+.art-grid > .px-card:not(.art-card),
+.art-grid > .hint {
+  flex: 1 1 100%;
+  width: 100%;
 }
 
 .art-card {
@@ -710,11 +729,17 @@ textarea.px-input {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
   padding: 12px;
 }
 
 .art-card img {
+  display: block;
   width: 100%;
+  max-width: 100%;
   height: auto;
   max-height: none;
   image-rendering: pixelated;
@@ -974,7 +999,7 @@ a:not(.px-btn):not(.author-chip):not(.author-link):not(.logo):not(.px-title):not
     padding: 20px;
   }
   .art-grid {
-    gap: 12px;
+    --art-gap: 12px;
   }
   .wrap {
     padding-bottom: 60px;
@@ -1036,17 +1061,17 @@ a:not(.px-btn):not(.author-chip):not(.author-link):not(.logo):not(.px-title):not
     padding: 3px 10px;
   }
 
-  /* 下载行三件平分整行，不再挤左空右（倍率下拉已被重画为 .ps-wrap，原生 select 只是值仓） */
-  .art-detail .ps-wrap,
-  .art-detail #dl-btn,
-  .art-detail #like-btn {
-    flex: 1 1 1 0;
+  /* 操作按钮一排排布，放不下自动换行；窄屏时允许弹性拉伸填满剩余空间 */
+  .art-detail .art-actions > .ps-wrap,
+  .art-detail .art-actions > .px-btn,
+  .art-detail .art-actions > a.px-btn {
+    flex: 1 1 auto;
     min-width: 0;
     text-align: center;
   }
 
   /* 下拉按钮撑满自己的格 */
-  .art-detail .ps-wrap .ps-btn {
+  .art-detail .art-actions .ps-wrap .ps-btn {
     width: 100%;
   }
 
@@ -1131,7 +1156,7 @@ a:not(.px-btn):not(.author-chip):not(.author-link):not(.logo):not(.px-title):not
     padding: 6px 12px;
   }
   .art-grid {
-    gap: 10px;
+    --art-gap: 10px;
   }
   .art-card {
     padding: 8px;
@@ -1180,6 +1205,32 @@ a:not(.px-btn):not(.author-chip):not(.author-link):not(.logo):not(.px-title):not
   border: 2px solid var(--ink);
   border-radius: var(--radius-sm);
   display: inline-block;
+}
+
+/* 作品页操作按钮：一排显示，放不下自动换行，并统一控件高度 */
+.art-actions {
+  align-items: center;
+}
+
+.art-actions > .px-btn,
+.art-actions > a.px-btn,
+.art-actions > .ps-wrap,
+.art-actions > .ps-wrap .ps-btn {
+  height: 40px;
+  min-height: 40px;
+  box-sizing: border-box;
+}
+
+.art-actions > .px-btn,
+.art-actions > a.px-btn,
+.art-actions > .ps-wrap .ps-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.art-actions > .ps-wrap {
+  display: inline-flex;
 }
 
 /* 作品页点赞：大拇指图标，与同行按钮同高对齐 */

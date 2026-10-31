@@ -48,11 +48,160 @@ export function artCard(a) {
   return `
     <div class="art-card px-card" data-art="${a.id}">
       <a href="#/art/${a.id}" style="display:contents">
-        <img src="${a.png_url}" alt="${esc(a.title)}" loading="lazy" data-gal="${a.id}">
+        <img src="${a.png_url}" alt="${esc(a.title)}" loading="lazy" data-gal="${a.id}"${Number(a.width) > 0 && Number(a.height) > 0 ? ` width="${Number(a.width)}" height="${Number(a.height)}"` : ""}>
       </a>
       <b><a href="#/art/${a.id}" class="ellipsis-1" style="color:inherit;text-decoration:none" title="${esc(a.title)}">${esc(a.title)}</a></b>
       <span class="hint" style="display:block">浏览 ${a.views} · 点赞 ${a.likes_count} · 评论 ${a.comments_count}</span>
     </div>`;
+}
+
+// 从左往右瀑布流：按原始顺序塞进当前最短列，避免 CSS columns 的先竖后横
+function artGridColCount(box) {
+  const styles = getComputedStyle(box);
+  const gap = Number.parseFloat(styles.getPropertyValue("--art-gap")) || 16;
+  const min = Number.parseFloat(styles.getPropertyValue("--art-col-min")) || 200;
+  const width = box.clientWidth || 0;
+  if (width <= 0) return 1;
+  return Math.max(1, Math.floor((width + gap) / (min + gap)));
+}
+
+function nextArtMasonryIndex(box) {
+  const n = Number(box.dataset.masonryNext || 0);
+  box.dataset.masonryNext = String(n + 1);
+  return n;
+}
+
+function collectArtCards(box) {
+  return [...box.querySelectorAll(".art-card")].sort(
+    (a, b) => Number(a.dataset.masonryI || 0) - Number(b.dataset.masonryI || 0)
+  );
+}
+
+function getArtGridCols(box) {
+  return [...box.querySelectorAll(":scope > .art-grid-col")];
+}
+
+function rebuildArtGridCols(box, count) {
+  const cols = Array.from({ length: count }, () => {
+    const col = document.createElement("div");
+    col.className = "art-grid-col";
+    return col;
+  });
+  box.replaceChildren(...cols);
+  return cols;
+}
+
+function placeArtCards(cols, cards) {
+  const heights = cols.map(() => 0);
+  for (const card of cards) {
+    let i = 0;
+    for (let k = 1; k < heights.length; k++) if (heights[k] < heights[i]) i = k;
+    cols[i].appendChild(card);
+    heights[i] += card.offsetHeight || 1;
+  }
+}
+
+function appendCardsToShortestCols(cols, cards) {
+  const heights = cols.map((col) => col.offsetHeight);
+  for (const card of cards) {
+    let i = 0;
+    for (let k = 1; k < heights.length; k++) if (heights[k] < heights[i]) i = k;
+    cols[i].appendChild(card);
+    heights[i] = cols[i].offsetHeight;
+  }
+}
+
+function restoreScroll(x, y) {
+  // 重建列时高度会短暂塌掉，浏览器会把滚动钳回顶部；量高后再还原
+  window.scrollTo(x, y);
+  requestAnimationFrame(() => {
+    if (window.scrollX !== x || window.scrollY !== y) window.scrollTo(x, y);
+  });
+}
+
+function scheduleArtGridLayout(box) {
+  clearTimeout(box._masonryTimer);
+  box._masonryTimer = setTimeout(() => layoutArtGrid(box), 50);
+}
+
+function watchArtCardImages(box, cards) {
+  for (const card of cards) {
+    const img = card.querySelector("img");
+    if (!img || img.dataset.masonryBound) continue;
+    img.dataset.masonryBound = "1";
+    if (img.complete) continue;
+    // 图片到位后只在列数变化时才全量重排；同列数下不再重建，避免滚到底加载时被弹回顶部
+    const onDone = () => {
+      if (Number(box.dataset.masonryCols || 0) !== artGridColCount(box)) scheduleArtGridLayout(box);
+    };
+    img.addEventListener("load", onDone, { once: true });
+    img.addEventListener("error", onDone, { once: true });
+  }
+}
+
+export function layoutArtGrid(box) {
+  if (!box || !box.classList.contains("art-grid")) return;
+  if (box.querySelector(":scope > .empty-wall, :scope > .hint, :scope > .px-card:not(.art-card)")) return;
+  const cards = collectArtCards(box);
+  if (!cards.length) return;
+  for (const card of cards) {
+    if (card.dataset.masonryI == null) card.dataset.masonryI = String(nextArtMasonryIndex(box));
+  }
+  const ordered = collectArtCards(box);
+  const count = artGridColCount(box);
+  const scrollX = window.scrollX;
+  const scrollY = window.scrollY;
+  const cols = rebuildArtGridCols(box, count);
+  placeArtCards(cols, ordered);
+  watchArtCardImages(box, ordered);
+  box.dataset.masonryCols = String(count);
+  restoreScroll(scrollX, scrollY);
+}
+
+export function appendArtCards(box, html) {
+  if (!box) return [];
+  const tmp = document.createElement("div");
+  tmp.innerHTML = html;
+  const cards = [...tmp.children].filter((el) => el.classList?.contains("art-card"));
+  if (!cards.length) {
+    box.insertAdjacentHTML("beforeend", html);
+    return [];
+  }
+  for (const card of cards) card.dataset.masonryI = String(nextArtMasonryIndex(box));
+
+  const count = artGridColCount(box);
+  let cols = getArtGridCols(box);
+  // 加载更多：只往现有最短列追加，绝不 rebuild，避免页面跳高后滚回顶部
+  if (cols.length === count) {
+    appendCardsToShortestCols(cols, cards);
+    watchArtCardImages(box, cards);
+    return cards;
+  }
+
+  // 首屏或列数变了：需要建列。若已有旧卡，走保留滚动位置的全量排布
+  if (collectArtCards(box).length) {
+    box.append(...cards);
+    layoutArtGrid(box);
+    return cards;
+  }
+
+  cols = rebuildArtGridCols(box, count);
+  appendCardsToShortestCols(cols, cards);
+  watchArtCardImages(box, cards);
+  box.dataset.masonryCols = String(count);
+  return cards;
+}
+
+export function wireArtGrids() {
+  if (window.__pxArtMasonry) return;
+  window.__pxArtMasonry = true;
+  let timer = 0;
+  window.addEventListener("resize", () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      document.querySelectorAll(".art-grid").forEach((box) => layoutArtGrid(box));
+    }, 120);
+  });
 }
 
 let galleryTab = "new";
@@ -114,8 +263,12 @@ export async function loadGallery(more = false) {
   if (!more && !r.data.items.length) {
     box.innerHTML = `<div class="px-card empty-wall">还没有作品，去发第一张吧<a href="#/draw" class="px-btn px-btn--cherry">开始作画</a></div>`;
   } else {
-    if (!more) box.innerHTML = "";
-    box.innerHTML += r.data.items.map(artCard).join("");
+    if (!more) {
+      box.innerHTML = "";
+      delete box.dataset.masonryNext;
+      delete box.dataset.masonryCols;
+    }
+    appendArtCards(box, r.data.items.map(artCard).join(""));
   }
   galleryPage++;
   galleryHasMore = !!r.data.has_more;
@@ -123,7 +276,7 @@ export async function loadGallery(more = false) {
   if (end) end.hidden = galleryHasMore;
 }
 
-// 滚到底自动加载下一页（一页 12 张约两行），代替“更多”按钮
+// 滚到底自动加载下一页（一页 24 张，宽屏瀑布流大约多铺几行），代替“更多”按钮
 export function wireGalleryInfinite() {
   if (window.__pxGalScroll) return;
   window.__pxGalScroll = true;

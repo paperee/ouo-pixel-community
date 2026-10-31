@@ -38,22 +38,19 @@ export async function mountArt(id, user) {
           <span class="px-badge">${a.layers_count || 1} 层</span>
         </div>
         ${a.fork_from_id ? `<p class="hint" style="margin:0">该作品从 <a href="#/art/${a.fork_from_id}">#${a.fork_from_id} 原作</a> 开始继续创作</p>` : ""}
-        <p>${esc(a.description) || '<span class="hint">作者很懒，没写简介。</span>'}</p>
+        <p><span class="hint">${esc(a.description) || '作者很懒，没写简介。'}</span></p>
         <div class="row">${tags.map((t) => `<span class="px-badge">${esc(t)}</span>`).join("")}</div>
         <p class="hint art-author-line"><a href="#/user/${a.author_id}" class="author-link author-link--soft" title="查看作者主页">作者 ${esc(a.author_name)} →</a> · 浏览 ${a.views} · 点赞 <span id="m-likes">${a.likes_count}</span> · 评论 <span id="m-comments">${a.comments_count}</span></p>
         <p class="hint">发布于 ${esc(String(a.created_at || "").slice(0, 16))}</p>
         ${palette.length ? `<div class="art-palette" aria-label="主要配色">${palette.map((c) => `<span class="swatch" style="background:${c}" title="${c}"></span>`).join("")}</div>` : ""}
-        <div class="row">
+        <div class="row art-actions">
           ${showDl ? `
           <select id="dl-scale" class="px-btn" style="height:40px;padding:0 14px"><option value="1">1x</option><option value="2" selected>2x</option><option value="4">4x</option><option value="8">8x</option></select>
           <button class="px-btn px-btn--mint" id="dl-btn" style="padding:0 14px">下载PNG${!canDl && mine ? "（仅自己）" : ""}</button>
-          ` : `<span class="hint">作者未开放下载（仅作者可见原图）</span>`}
+          ` : ""}
           ${user ? `<button class="px-btn ${r.data.liked ? "px-btn--cherry" : ""}" id="like-btn" title="点赞">${nIcon("thumb")}<span id="like-n">${a.likes_count}</span></button>` : ""}
-        </div>
-        <div class="row">
           ${showRemix && user ? `<button class="px-btn px-btn--sky" id="remix-btn">二次创作（${!canRemix && mine ? "仅自己" : "继续画"}）</button>` : ""}
           ${showRemix && !user ? `<a class="px-btn px-btn--sky" href="#/login" style="text-decoration:none">二次创作（登录后从模板开始画）</a>` : ""}
-          ${!showRemix ? `<span class="hint">作者未开放续画</span>` : ""}
           ${user?.is_admin ? `<button class="px-btn px-btn--cherry" id="admin-unpub">取消发布</button>` : ""}
         </div>
         <h2 class="px-title px-title--sub">评论（<span id="c-n">${a.comments_count}</span>）</h2>

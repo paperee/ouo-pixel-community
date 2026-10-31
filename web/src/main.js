@@ -9,7 +9,7 @@ import { initCustomScroll } from "./scroll.js";
 import { initPixelSelects } from "./pixel-select.js";
 import { initPixelTips } from "./tooltip.js";
 import { uiAlert, uiNotice } from "./dialog.js";
-import { loadGallery, mountHomeEdge, pageHome, wireGalleryInfinite, wireGalleryTabs, wireHomeEgg } from "./pages/home.js";
+import { layoutArtGrid, loadGallery, mountHomeEdge, pageHome, wireArtGrids, wireGalleryInfinite, wireGalleryTabs, wireHomeEgg } from "./pages/home.js";
 import { pageAuth, wireAuthForm } from "./pages/auth.js";
 import { pageMe, pageUser, wireMePage } from "./pages/me.js";
 import { loadDrafts, loadPublished, wireDrafts } from "./pages/drafts.js";
@@ -132,6 +132,7 @@ async function render() {
         candidates,
         data.pet?.kind === "artwork" ? data.pet : null
       );
+    document.querySelectorAll(".art-grid").forEach((box) => layoutArtGrid(box));
   } else if (hash.startsWith("#/draw")) {
     // 绘画软件式三栏全幅（去掉网页左右内边距）
     app.innerHTML = nav(user) + `<div class="draw-page"><div id="draw-root"></div></div>`;
@@ -294,6 +295,7 @@ async function render() {
       }
       const html = pageUser(ur.data.user, ur.data.stats, wr.status === 200 ? wr.data.items : [], ur.data.pet?.kind === "artwork" ? ur.data.pet : null);
       root.innerHTML = html.replace(/^\s*<main[^>]*>/, "").replace(/<\/main>\s*$/, "");
+      document.querySelectorAll(".art-grid").forEach((box) => layoutArtGrid(box));
       wireDraftPreview();
       wirePet();
     })();
@@ -341,6 +343,7 @@ async function render() {
   }
 
   wireNav();
+  wireArtGrids();
   wireGalleryTabs();
   wireGalleryInfinite();
   loadGallery(false);

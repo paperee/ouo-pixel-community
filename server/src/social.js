@@ -1,10 +1,26 @@
 // 社交：点赞 / 评论（含楼中楼一级回复）/ 通知（被赞、被评论、被@）/ 拉黑联动
 import { Router } from "express";
 import { db } from "./db.js";
-import { requireLogin } from "./auth.js";
+import { isAdminEmail, requireLogin } from "./auth.js";
 import { rateLimit } from "./ratelimit.js";
 
 export const socialRouter = Router();
+
+// ---- 公告板：所有人可见，管理员编辑（内容 2000 字内，纯文本） ----
+socialRouter.get("/board", (req, res) => {
+  const row = db.prepare("SELECT content, updated_at FROM board WHERE id = 1").get();
+  res.json({ board: { content: row?.content || "", updated_at: row?.updated_at || null } });
+});
+socialRouter.put("/board", requireLogin, (req, res) => {
+  const me = db.prepare("SELECT email FROM users WHERE id = ?").get(req.session.userId);
+  if (!me || !isAdminEmail(me.email)) return res.status(403).json({ error: "forbidden" });
+  const content = String(req.body?.content || "").trim().slice(0, 2000);
+  db.prepare(
+    `INSERT INTO board (id, content, updated_by, updated_at) VALUES (1, ?, ?, datetime('now'))
+     ON CONFLICT(id) DO UPDATE SET content = excluded.content, updated_by = excluded.updated_by, updated_at = excluded.updated_at`
+  ).run(content, req.session.userId);
+  res.json({ ok: true });
+});
 
 function visibleArtwork(id, userId) {
   const row = db.prepare("SELECT * FROM artworks WHERE id = ?").get(id);
@@ -71,14 +87,41 @@ socialRouter.delete("/artworks/:id/like", requireLogin, (req, res) => {
 socialRouter.get("/artworks/:id/comments", (req, res) => {
   const art = visibleArtwork(Number(req.params.id), req.session.userId);
   if (!art) return res.status(404).json({ error: "no_such_artwork" });
+  const pageSize = 4;
+  const rawPage = Number.parseInt(req.query.page, 10);
+  const page = Number.isFinite(rawPage) ? Math.max(1, rawPage) : 1;
+  const total = db
+    .prepare("SELECT COUNT(*) AS count FROM comments WHERE artwork_id = ? AND deleted = 0")
+    .get(art.id).count;
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const currentPage = Math.min(page, pages);
   const items = db
     .prepare(
-      `SELECT c.id, c.parent_id, c.content, c.created_at, c.user_id, u.nickname
+      `SELECT c.id, c.parent_id, c.content, c.created_at, c.user_id, u.nickname,
+              pc.user_id AS parent_user_id, pu.nickname AS parent_nickname
        FROM comments c JOIN users u ON u.id = c.user_id
-       WHERE c.artwork_id = ? AND c.deleted = 0 ORDER BY c.id ASC LIMIT 100`
+       LEFT JOIN comments pc ON pc.id = c.parent_id
+       LEFT JOIN users pu ON pu.id = pc.user_id
+       WHERE c.artwork_id = ? AND c.deleted = 0 ORDER BY c.id ASC LIMIT ? OFFSET ?`
     )
-    .all(art.id);
-  res.json({ items });
+    .all(art.id, pageSize, (currentPage - 1) * pageSize);
+  // 管理员标签：按邮箱白名单判定，只下发一个布尔值、不泄露邮箱
+  const mails = new Map(
+    db
+      .prepare(`SELECT id, email FROM users WHERE id IN (SELECT DISTINCT user_id FROM comments WHERE artwork_id = ? AND deleted = 0)`)
+      .all(art.id)
+      .map((u) => [u.id, u.email])
+  );
+  for (const c of items) c.is_admin = isAdminEmail(mails.get(c.user_id));
+  res.json({
+    items,
+    page: currentPage,
+    page_size: pageSize,
+    total,
+    pages,
+    has_prev: currentPage > 1,
+    has_next: currentPage < pages,
+  });
 });
 
 // ---- 发评论：一级回复 + @通知 ----
@@ -118,12 +161,13 @@ socialRouter.post(
   }
 );
 
-// ---- 删评论：自己删自己的，作者可删本作品下任何评论（软删） ----
+// ---- 删评论：自己删自己的，作者可删本作品下任何评论，管理员可删任何评论（软删） ----
 socialRouter.delete("/comments/:id", requireLogin, (req, res) => {
   const c = db.prepare("SELECT * FROM comments WHERE id = ? AND deleted = 0").get(Number(req.params.id));
   if (!c) return res.status(404).json({ error: "no_such_comment" });
   const art = db.prepare("SELECT author_id FROM artworks WHERE id = ?").get(c.artwork_id);
-  if (c.user_id !== req.session.userId && art?.author_id !== req.session.userId)
+  const me = db.prepare("SELECT email FROM users WHERE id = ?").get(req.session.userId);
+  if (c.user_id !== req.session.userId && art?.author_id !== req.session.userId && !isAdminEmail(me?.email))
     return res.status(403).json({ error: "forbidden" });
   db.prepare("UPDATE comments SET deleted = 1 WHERE id = ?").run(c.id);
   recountComments(c.artwork_id);

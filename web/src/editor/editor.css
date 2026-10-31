@@ -194,6 +194,25 @@
   flex-wrap: wrap;
 }
 
+/* 右侧栏调色板：每行 6 个均匀分布（只限作画页侧栏，不碰别处 .swatch） */
+.ed-side .swatches {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+}
+.ed-side .swatch {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+}
+
+/* 调色板标题行右侧的当前颜色：小圆点，不占行 */
+.ed-side .swatch--cur {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+
 .swatch {
   width: 24px;
   height: 24px;
@@ -232,7 +251,7 @@
 }
 
 .draw-rail {
-  width: 184px;
+  width: 185px;
   flex-shrink: 0;
   overflow-y: auto;
   display: flex;
@@ -336,7 +355,7 @@
 }
 
 .draw-app .ed-side {
-  width: 224px;
+  width: 220px;
   flex-shrink: 0;
   overflow-y: auto;
   display: flex;
@@ -416,15 +435,14 @@
   font-size: 13px;
   color: var(--ink);
   background: transparent;
-  border: none;
-  border-bottom: 2px solid var(--ink);
-  border-radius: 0;
-  padding: 4px 2px;
+  border: 2px dashed var(--line, #e5d9c5);
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
   outline: none;
 }
 
 .underline-input:focus {
-  border-bottom-color: var(--accent);
+  border-color: var(--accent);
 }
 
 /* 图层按钮 2 行 x 3 列 */
@@ -488,11 +506,23 @@
 
 .dlg {
   width: min(360px, 92vw);
+  border-color: var(--ink-soft);
+  box-shadow: 6px 6px 0 var(--ink-soft);
+  background: var(--bg);
+}
+
+.dlg h2 {
+  margin-top: 0;
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--line);
 }
 
 .dlg p {
   margin: 0;
   overflow-wrap: break-word;
+  white-space: pre-wrap;
+  font-size: 14.5px;
+  line-height: 1.7;
 }
 
 .dlg .px-input {
@@ -570,6 +600,20 @@
   }
 }
 
+/* 中屏（≤860px）：作画区堆叠（与 base 同文件，免 style.css 同优先级覆盖被加载顺序吞掉） */
+@media (max-width: 860px) {
+  .ed-main {
+    flex-direction: column;
+  }
+  .ed-side {
+    width: 100%;
+  }
+  /* 必须带 .draw-center 作用域：裸 .ed-stage 会被 base 里 max-height:none 盖掉 */
+  .draw-center .ed-stage {
+    padding: 12px;
+  }
+}
+
 /* 第二阶段（≤700px）：状态条按分隔线分组换行（竖线变整行横线，避免换行时落单） */
 @media (max-width: 700px) {
   .draw-status > .tool-sep {
@@ -614,9 +658,15 @@
 }
 
 /* 小手机：画布区边距再收一档，触屏按钮至少 44px 高 */
-@media (max-width: 500px) {
+@media (max-width: 520px) {
+  /* base 与本覆盖同文件，避免被加载顺序吞掉（style.css 里同优先级的覆盖不生效） */
+  .tool-btn {
+    padding: 4px 12px;
+  }
+  .ps-btn {
+    padding: 4px 26px 4px 8px;
+  }
   .draw-center .ed-stage {
-    max-height: 52vh;
     padding: 8px;
   }
   .draw-status {
@@ -644,7 +694,7 @@
   border: var(--border-w) solid var(--edge);
   border-radius: var(--radius);
   box-shadow: var(--shadow-hard-sm);
-  padding: 14px;
+  padding: 14px 14px 8px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -665,7 +715,7 @@
   color: var(--ink-soft);
   text-align: center;
   border-top: 2px solid var(--line);
-  padding-top: 2px;
+  padding-top: 6px;
   margin-top: 4px;
 }
 
@@ -761,7 +811,6 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 320px;
   overflow-y: auto;
 }
 
@@ -793,7 +842,8 @@
 
 .layer canvas {
   width: 40px;
-  height: 40px;
+  height: auto;
+  max-width: 40px;
   image-rendering: pixelated;
   border: 2px solid var(--edge);
   border-radius: var(--radius-sm);

@@ -14,10 +14,10 @@ import {
   moveLayerTo,
   insertLayerAbove,
   overPixel,
+  restore,
   serialize,
   setPixel,
   snapshot,
-  restore,
 } from "./doc.js";
 import {
   ellipsePoints,
@@ -200,12 +200,15 @@ const per = (Date.now() - t0) / 20;
 console.log(`COMPOSITE_64x64x8: ${per.toFixed(2)}ms`);
 assert.ok(per < 16, `too slow: ${per}ms`);
 
-// 封面：64x64 压到 48x48，颜色抽样正确
+// 封面：默认保留 64x64 原尺寸，可显式传 max 后缩放
 const covPx = new Uint8ClampedArray(64 * 64 * 4);
 covPx.fill(255);
 const cov = coverOf(covPx, 64, 64);
-assert.equal(cov.w, 48);
-assert.equal(cov.h, 48);
+assert.equal(cov.w, 64);
+assert.equal(cov.h, 64);
+const shrunkCover = coverOf(covPx, 64, 64, 48);
+assert.equal(shrunkCover.w, 48);
+assert.equal(shrunkCover.h, 48);
 assert.ok(cov.data.length > 100);
 
 // HSV 往返：红绿蓝白黑 + 随机抽查

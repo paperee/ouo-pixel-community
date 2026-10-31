@@ -42,23 +42,58 @@ export const REPORT_REASONS = [
 const PUBLIC_USER =
   "id, nickname, email, avatar_url, bio, created_at";
 
+function publishedAvatar(userId, avatarUrl) {
+  if (!avatarUrl) return null;
+  const artwork = db
+    .prepare("SELECT 1 FROM artworks WHERE author_id = ? AND png_url = ? AND status IN ('normal','featured')")
+    .get(userId, avatarUrl);
+  if (artwork) return avatarUrl;
+  db.prepare("UPDATE users SET avatar_url = NULL WHERE id = ? AND avatar_url = ?").run(userId, avatarUrl);
+  return null;
+}
+
 export const authRouter = Router();
 
+// 管理员邮箱白名单（懒加载，方便自测时注入）；判权统一走这里
+export function isAdminEmail(email) {
+  const list = (process.env.ADMIN_EMAILS || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  return list.includes(String(email || "").toLowerCase());
+}
+
+// 趣味接口：最新注册的用户（id 最大那位），供 #/user/latest 跳转；必须在 :id 前面
+authRouter.get("/users/latest", (req, res) => {
+  const row = db
+    .prepare("SELECT id, nickname, avatar_url, bio, created_at FROM users ORDER BY id DESC LIMIT 1")
+    .get();
+  if (!row) return res.status(404).json({ error: "no_users_yet" });
+  row.avatar_url = publishedAvatar(row.id, row.avatar_url);
+  res.json({ user: row });
+});
+
 // 公开用户信息（用于作者主页）
-authRouter.get("/users/:id", (req, res) => {
+authRouter.get("/users/:id", async (req, res) => {
   const uid = Number(req.params.id);
   if (!uid) return res.status(400).json({ error: "bad_id" });
   const row = db
     .prepare(`SELECT id, nickname, avatar_url, bio, created_at FROM users WHERE id = ?`)
     .get(uid);
   if (!row) return res.status(404).json({ error: "no_such_user" });
+  row.avatar_url = publishedAvatar(row.id, row.avatar_url);
   const artworks = db
     .prepare("SELECT COUNT(*) c FROM artworks WHERE author_id = ? AND status IN ('normal','featured')")
     .get(row.id).c;
   const likes = db
     .prepare("SELECT COALESCE(SUM(likes_count),0) s FROM artworks WHERE author_id = ? AND status IN ('normal','featured')")
     .get(row.id).s;
-  res.json({ user: row, stats: { artworks, likes } });
+  const views = db
+    .prepare("SELECT COALESCE(SUM(views),0) s FROM artworks WHERE author_id = ? AND status IN ('normal','featured')")
+    .get(row.id).s;
+  const comments = db
+    .prepare("SELECT COALESCE(SUM(comments_count),0) s FROM artworks WHERE author_id = ? AND status IN ('normal','featured')")
+    .get(row.id).s;
+  const mail = db.prepare("SELECT email FROM users WHERE id = ?").get(row.id).email;
+  const pet = await petOf(row.id);
+  res.json({ user: { ...row, is_admin: isAdminEmail(mail) }, stats: { artworks, likes, views, comments }, pet });
 });
 
 authRouter.post(
@@ -101,6 +136,7 @@ authRouter.post(
     if (!row || !(await verifyPassword(password || "", row.password_hash)))
       return res.status(401).json({ error: "bad_credentials" });
     delete row.password_hash;
+    row.avatar_url = publishedAvatar(row.id, row.avatar_url);
     req.session.userId = row.id;
     res.json({ user: row });
   }
@@ -110,18 +146,25 @@ authRouter.post("/logout", (req, res) => {
   req.session.destroy(() => res.json({ ok: true }));
 });
 
-authRouter.get("/me", requireLogin, (req, res) => {
+authRouter.get("/me", requireLogin, async (req, res) => {
   const row = db
     .prepare(`SELECT ${PUBLIC_USER} FROM users WHERE id = ?`)
     .get(req.session.userId);
   if (!row) return res.status(401).json({ error: "login_required" });
+  row.avatar_url = publishedAvatar(row.id, row.avatar_url);
   const artworks = db
-    .prepare("SELECT COUNT(*) c FROM artworks WHERE author_id = ?")
+    .prepare("SELECT COUNT(*) c FROM artworks WHERE author_id = ? AND status IN ('normal','featured')")
     .get(row.id).c;
   const likes = db
-    .prepare("SELECT COALESCE(SUM(likes_count),0) s FROM artworks WHERE author_id = ?")
+    .prepare("SELECT COALESCE(SUM(likes_count),0) s FROM artworks WHERE author_id = ? AND status IN ('normal','featured')")
     .get(row.id).s;
-  res.json({ user: row, stats: { artworks, likes } });
+  const views = db
+    .prepare("SELECT COALESCE(SUM(views),0) s FROM artworks WHERE author_id = ? AND status IN ('normal','featured')")
+    .get(row.id).s;
+  const comments = db
+    .prepare("SELECT COALESCE(SUM(comments_count),0) s FROM artworks WHERE author_id = ? AND status IN ('normal','featured')")
+    .get(row.id).s;
+  res.json({ user: { ...row, is_admin: isAdminEmail(row.email) }, stats: { artworks, likes, views, comments }, pet: await petOf(row.id) });
 });
 
 authRouter.patch("/me", requireLogin, (req, res) => {
@@ -137,12 +180,13 @@ authRouter.patch("/me", requireLogin, (req, res) => {
   res.json({ ok: true });
 });
 
-// 头像：只能选用本人在社区发布过的作品（作品原图即头像，防外部上传刷头像）
+// 头像只能选用自己已发布且未下架的作品（原图即头像）
 authRouter.post("/me/avatar", requireLogin, (req, res) => {
   const artworkId = Number(req.body?.artwork_id);
+  if (req.body?.draft_id) return res.status(400).json({ error: "published_artwork_required" });
   if (!artworkId) return res.status(400).json({ error: "bad_artwork" });
   const a = db
-    .prepare("SELECT id, png_url FROM artworks WHERE id = ? AND author_id = ? AND status != 'removed'")
+    .prepare("SELECT id, png_url FROM artworks WHERE id = ? AND author_id = ? AND status IN ('normal', 'featured')")
     .get(artworkId, req.session.userId);
   if (!a) return res.status(404).json({ error: "no_such_artwork" });
   db.prepare("UPDATE users SET avatar_url = ? WHERE id = ?").run(a.png_url, req.session.userId);
@@ -153,6 +197,37 @@ authRouter.post("/me/avatar", requireLogin, (req, res) => {
 authRouter.delete("/me/avatar", requireLogin, (req, res) => {
   db.prepare("UPDATE users SET avatar_url = NULL WHERE id = ?").run(req.session.userId);
   res.json({ ok: true });
+});
+
+
+async function petOf(userId) {
+  const row = db.prepare("SELECT pet_artwork_id, pet_flip, pet_kind FROM users WHERE id = ?").get(userId);
+  if (!row?.pet_artwork_id) return null;
+  if (row.pet_kind === "draft") {
+    db.prepare("UPDATE users SET pet_artwork_id = NULL, pet_flip = 0, pet_kind = 'artwork' WHERE id = ?").run(userId);
+    return null;
+  }
+  const art = db
+    .prepare("SELECT id, title, png_url, width, height FROM artworks WHERE id = ? AND author_id = ? AND status IN ('normal','featured')")
+    .get(row.pet_artwork_id, userId);
+  if (!art) return null;
+  return { kind: "artwork", artwork_id: art.id, title: art.title, png_url: art.png_url, width: art.width, height: art.height, flip: row.pet_flip ? 1 : 0 };
+}
+
+authRouter.put("/me/pet", requireLogin, async (req, res) => {
+  if (req.body?.draft_id) return res.status(400).json({ error: "published_artwork_required" });
+  const artworkId = Number(req.body?.artwork_id);
+  const flip = req.body?.flip ? 1 : 0;
+  if (!artworkId) {
+    db.prepare("UPDATE users SET pet_artwork_id = NULL, pet_flip = 0, pet_kind = 'artwork' WHERE id = ?").run(req.session.userId);
+    return res.json({ pet: null });
+  }
+  const art = db
+    .prepare("SELECT id FROM artworks WHERE id = ? AND author_id = ? AND status IN ('normal','featured')")
+    .get(artworkId, req.session.userId);
+  if (!art) return res.status(404).json({ error: "no_such_artwork" });
+  db.prepare("UPDATE users SET pet_artwork_id = ?, pet_flip = ?, pet_kind = 'artwork' WHERE id = ?").run(art.id, flip, req.session.userId);
+  res.json({ pet: await petOf(req.session.userId) });
 });
 
 authRouter.post("/reports", requireLogin, (req, res) => {

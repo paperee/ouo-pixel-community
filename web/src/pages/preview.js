@@ -6,8 +6,13 @@ import { uiAlert, uiConfirm } from "../dialog.js";
 import { esc } from "./shared.js";
 
 // 草稿箱大图预览：鼠标移到小图上只显示"按住 Z 显示大图"提示，按住 Z 才出大图
+// 触屏无 Z 键：同一批目标长按 500ms 等效按住 Z，松手隐藏（长按后松手不触发点击跳转）
+const TOUCH_UI = typeof window !== "undefined" && !!window.matchMedia?.("(pointer: coarse)").matches;
+const LONG_PRESS_MS = 500;
+const LONG_PRESS_TOL = 12;
+const zHintBig = () => (TOUCH_UI ? "长按显示大图" : "按住 Z 显示大图");
 export function wireDraftPreview() {
-  const boxes = [document.querySelector("#draft-list"), document.querySelector("#pub-list"), document.querySelector("#art-layers"), document.querySelector("#gallery")].filter(Boolean);
+  const boxes = [document.querySelector("#draft-list"), document.querySelector("#pub-list"), document.querySelector("#art-layers"), document.querySelector("#gallery"), document.querySelector(".me-wall")].filter(Boolean);
   if (!boxes.length) return;
   let pv = document.querySelector("#draft-preview");
   if (!pv) {
@@ -55,7 +60,7 @@ export function wireDraftPreview() {
         return;
       }
     }
-    if (st.el?.dataset?.gal != d.id || !st.z) return;
+    if (st.el?.dataset?.gal != d.id || (!st.z && !st.touch)) return;
     let layers = [];
     try {
       const doc = JSON.parse(d.layers_json || "null");
@@ -84,6 +89,7 @@ export function wireDraftPreview() {
   const st = (window.__pxPrev = window.__pxPrev || { el: null, x: 0, y: 0, z: false });
   st.el = null;
   st.z = false;
+  st.touch = false;
   const cap = pv.querySelector("b");
   const c = pv.querySelector("canvas");
   const place = (el, x, y) => {
@@ -120,9 +126,11 @@ export function wireDraftPreview() {
     if (!el.width) return false;
     const row = el.closest("[data-id],[data-pid]");
     cap.textContent = row?.querySelector("b")?.textContent || "";
-    // 作品页图层小图预览小一点（200px 上限 6 倍），草稿箱保持 320
+    // 无标题时藏起 b，免得空行撑出上边距、四边不对齐
+    cap.hidden = !cap.textContent;
+    // 悬停大图预览统一 200px 上限（作品页图层最多 6 倍）
     const inArtLayers = !!el.closest?.("#art-layers");
-    const s = Math.max(1, Math.min(inArtLayers ? 6 : 10, Math.floor((inArtLayers ? 200 : 320) / Math.max(el.width, el.height))));
+    const s = Math.max(1, Math.min(inArtLayers ? 6 : 10, Math.floor(200 / Math.max(el.width, el.height))));
     c.width = el.width * s;
     c.height = el.height * s;
     const ctx = c.getContext("2d");
@@ -144,20 +152,22 @@ export function wireDraftPreview() {
     }
     if (isGal) {
       pv.hidden = true;
-      if (st.z) {
+      if (st.z || st.touch) {
         hint.hidden = true;
         showGal(st.el.dataset.gal);
       } else {
         gal.hidden = true;
-        hint.textContent = "按住 Z 查看颜色与图层";
+        hint.textContent = TOUCH_UI ? "长按查看颜色与图层" : "按住 Z 查看颜色与图层";
         place(hint, st.x, st.y);
       }
       return;
     }
     if (gal) gal.hidden = true;
     const versHover = !!st.el?.matches?.(".ps-opt") && !!st.el?.closest?.("[data-vers]");
-    hint.textContent = versHover ? "按住 Z 显示大图 · 按 D 删除版本" : "按住 Z 显示大图";
-    if (st.z && renderBig()) {
+    hint.textContent = versHover
+      ? TOUCH_UI ? "长按显示大图" : "按住 Z 显示大图 · 按 D 删除版本"
+      : zHintBig();
+    if ((st.z || st.touch) && renderBig()) {
       hint.hidden = true;
       place(pv, st.x, st.y);
     } else {
@@ -166,6 +176,65 @@ export function wireDraftPreview() {
     }
   };
   for (const box of boxes) {
+    // 长按等效按住 Z（触屏）：500ms 不动即预览，松手隐藏；长按后松手不触发点击跳转
+    let lpTimer = null;
+    let lpFired = false;
+    let lpX = 0;
+    let lpY = 0;
+    const lpCancel = () => {
+      if (lpTimer) {
+        clearTimeout(lpTimer);
+        lpTimer = null;
+      }
+    };
+    box.addEventListener("touchstart", (e) => {
+      if (e.touches.length !== 1) return;
+      const th = e.target.closest?.(".draft-thumb, .ps-opt, img[data-gal]");
+      if (!th) return;
+      const t = e.touches[0];
+      lpFired = false;
+      lpX = t.clientX;
+      lpY = t.clientY;
+      lpCancel();
+      lpTimer = setTimeout(() => {
+        lpTimer = null;
+        lpFired = true;
+        st.el = th;
+        st.x = lpX;
+        st.y = lpY;
+        st.touch = true;
+        const tip = document.querySelector(".px-tip");
+        if (tip) tip.hidden = true;
+        refresh();
+      }, LONG_PRESS_MS);
+    }, { passive: true });
+    box.addEventListener("touchmove", (e) => {
+      if (!lpTimer || !e.touches.length) return;
+      const t = e.touches[0];
+      if (Math.hypot(t.clientX - lpX, t.clientY - lpY) > LONG_PRESS_TOL) lpCancel();
+    }, { passive: true });
+    const lpEnd = (e) => {
+      lpCancel();
+      if (lpFired) {
+        lpFired = false;
+        e.preventDefault();
+      }
+      if (st.touch) {
+        st.touch = false;
+        st.el = null;
+        refresh();
+      }
+    };
+    box.addEventListener("touchend", lpEnd, { passive: false });
+    box.addEventListener("touchcancel", () => {
+      lpCancel();
+      lpFired = false;
+      if (st.touch) {
+        st.touch = false;
+        st.el = null;
+        refresh();
+      }
+    });
     box.addEventListener("mouseover", (e) => {
       const th = e.target.closest?.(".draft-thumb, .ps-opt, img[data-gal]");
       if (!th) return;
@@ -204,6 +273,8 @@ export function wireDraftPreview() {
     document.addEventListener("keydown", (e) => {
       if ((e.key === "z" || e.key === "Z") && !e.repeat && !typing()) {
         st.z = true;
+        const tip = document.querySelector(".px-tip");
+        if (tip) tip.hidden = true;
         refresh();
       }
       // D 删除历史版本：只对版本列表里的选项生效（悬停项优先，无悬停用打开列表的选中项）
@@ -246,6 +317,7 @@ export function wireDraftPreview() {
     });
     window.addEventListener("blur", () => {
       st.z = false;
+      st.touch = false;
       if (pv) pv.hidden = true;
       if (gal) gal.hidden = true;
     });

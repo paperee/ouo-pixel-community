@@ -125,10 +125,12 @@
   padding: 20px;
 }
 
+
+
 .px-input {
   font-family: var(--font-body);
-  font-size: 15px;
-  padding: 10px 14px;
+  font-size: 14px;
+  padding: 6px 14px;
   border: var(--border-w) solid var(--edge);
   border-radius: var(--radius-sm);
   background: var(--field);
@@ -144,6 +146,24 @@
   font-family: var(--font-title);
   font-weight: 900;
   letter-spacing: 1px;
+}
+
+.me-title {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 30px;
+  justify-content: space-between;
+}
+
+/* 标题行标签组：统计徽章在左、管理员徽章在右，整组靠右，放不下时整组一起换行 */
+.me-title-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 .px-title--sub {

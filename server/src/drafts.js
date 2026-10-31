@@ -6,9 +6,9 @@ import { requireLogin } from "./auth.js";
 export const draftsRouter = Router();
 draftsRouter.use(requireLogin);
 
-const LIST_COLS = "id, title, canvas_w, canvas_h, cover, updated_at, version";
+const LIST_COLS = "id, title, canvas_w, canvas_h, layers_json, cover, updated_at, version";
 const MAX_DOC_BYTES = 6 * 1024 * 1024;
-const MAX_COVER_BYTES = 64 * 1024;
+const MAX_COVER_BYTES = 2 * 1024 * 1024;
 
 // 校验客户端传来的 serialize() 字符串
 function parseDoc(raw) {

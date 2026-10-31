@@ -1,4 +1,4 @@
-import "dotenv/config";
+import dotenv from "dotenv";
 import express from "express";
 import session from "express-session";
 import path from "node:path";
@@ -11,6 +11,10 @@ import { socialRouter } from "./social.js";
 import { analyticsRouter } from "./analytics.js";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
+// 环境变量：server/.env 优先，其次项目根 .env（dotenv 默认不覆盖已存在变量，所以先读优先项）
+// 注意 dir 是 src/ 目录，各回一层才是 server/ 与项目根
+dotenv.config({ path: path.join(dir, "..", ".env") });
+dotenv.config({ path: path.join(dir, "..", "..", ".env") });
 const app = express();
 app.disable("x-powered-by");
 const PORT = process.env.PORT || 3001;

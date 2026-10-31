@@ -11,6 +11,7 @@ export const NOTIF_TEXT = {
   approved: "你的作品审核通过，已公开展示",
   featured: "你的作品被选为精选",
   removed: "你的作品被下架",
+  remix: "续画了你的作品",
   welcome: "欢迎加入OuO像素画社区",
   system: "系统通知",
 };
@@ -18,12 +19,12 @@ export const NOTIF_GROUPS = [
   ["all", "全部"],
   ["unread", "未读"],
   ["like", "点赞"],
-  ["comment", "评论互动"],
-  ["system", "系统通知"],
+  ["comment", "互动"],
+  ["system", "系统"],
 ];
 export const NOTIF_GROUP_TYPES = {
   comment: ["comment", "reply", "mention"],
-  system: ["approved", "featured", "removed", "welcome", "system"],
+  system: ["approved", "featured", "removed", "welcome", "system", "remix"],
 };
 // 单条通知文案：谁 + 做了什么 + 哪件作品
 export function notifLine(n) {
@@ -44,6 +45,8 @@ export function notifLine(n) {
       return `你的作品${work}被选为精选，上首页露脸了`;
     case "removed":
       return `你的作品${work}被下架，看看是否命中了社区规范`;
+    case "remix":
+      return `${who} 续画了你的作品${work}，去围观一下吧`;
     case "welcome":
       return n.extra || "欢迎加入OuO像素画社区，去画第一张像素画吧";
     default:
@@ -116,7 +119,7 @@ export async function mountNotices() {
       </div>`
         )
         .join("")
-    : `<div class="px-card empty-wall">${notifGroup === "all" ? "还没有消息，去发作品等赞吧" : "这个分组暂无消息"}</div>`;
+    : `<div class="px-card empty-wall">${notifGroup === "all" ? "还没有消息，去发作品等赞吧！" : "这个箱子里空空如也。"}</div>`;
   root.innerHTML =
     `<div class="row notif-bar">
       <div class="row tabs" data-ng-tabs>${tabs}</div>

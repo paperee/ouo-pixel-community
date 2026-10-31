@@ -30,6 +30,7 @@ export default [
         location: "readonly",
         MutationObserver: "readonly",
         navigator: "readonly",
+        performance: "readonly",
         prompt: "readonly",
         requestAnimationFrame: "readonly",
         ResizeObserver: "readonly",

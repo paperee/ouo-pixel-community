@@ -27,6 +27,11 @@ export function initPixelTips() {
   document.addEventListener("dragend", () => { dragging = false; }, true);
   document.addEventListener("drop", () => { dragging = false; }, true);
   const show = (el, x, y) => {
+    // Z 预览（大图/头像）时不弹跟手提示，免得缀在旁边碍事
+    if (window.__pxPrev?.z || window.__pxPrev?.touch || window.__pxNick?.z || window.__pxEdZ) {
+      hide();
+      return;
+    }
     const text = claim(el);
     if (!text) return;
     anchor = el;
@@ -57,6 +62,10 @@ export function initPixelTips() {
   });
   document.addEventListener("mousemove", (e) => {
     if (dragging) return;
+    if (window.__pxPrev?.z || window.__pxPrev?.touch || window.__pxNick?.z || window.__pxEdZ) {
+      hide();
+      return;
+    }
     if (!tip.hidden) {
       move(e.clientX, e.clientY);
       return;

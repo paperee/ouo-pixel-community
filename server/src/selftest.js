@@ -94,7 +94,7 @@ const server = app.listen(0, async () => {
   r = await req("POST", "/api/drafts", JSON.stringify({ title: "坏的", doc: JSON.stringify({ v: 1, w: 999, h: 4, active: 0, layers: [] }) }));
   check("draft-bad-doc", r.status === 400);
   r = await req("GET", "/api/drafts");
-  check("draft-list", r.status === 200 && r.json.drafts.length === 1 && !("layers_json" in r.json.drafts[0]));
+  check("draft-list", r.status === 200 && r.json.drafts.length === 1 && r.json.drafts[0].layers_json === tinyDoc(4, true) && r.json.drafts[0].canvas_w === 4 && r.json.drafts[0].canvas_h === 4);
   r = await req("GET", `/api/drafts/${did}`);
   check("draft-get", r.status === 200 && typeof r.json.draft.layers_json === "string");
   r = await req("PUT", `/api/drafts/${did}`, JSON.stringify({ title: "改名", doc: tinyDoc(4, false) }));
@@ -208,8 +208,8 @@ const server = app.listen(0, async () => {
     c.writeUInt32BE(crc32(Buffer.concat([t, data])));
     return Buffer.concat([l, t, data, c]);
   };
-  const miniPng = (w, h) => {
-    const raw = Buffer.alloc(h * (1 + w * 4), 255);
+  const miniPng = (w, h, fill = 255) => {
+    const raw = Buffer.alloc(h * (1 + w * 4), fill);
     for (let y = 0; y < h; y++) raw[y * (1 + w * 4)] = 0;
     const ihdr = Buffer.alloc(13);
     ihdr.writeUInt32BE(w, 0);
@@ -224,6 +224,7 @@ const server = app.listen(0, async () => {
     ]).toString("base64");
   };
   const png4 = miniPng(4, 4);
+  const png4b = miniPng(4, 4, 0); // 不同字节的 4x4，用于区分头像来源
   const png8 = miniPng(8, 8);
   const pub = (body) => req("POST", "/api/artworks", JSON.stringify(body));
   cookie = "";
@@ -248,22 +249,34 @@ const server = app.listen(0, async () => {
   check("png-bytes-in-db", Buffer.from(rawB64, "base64").subarray(0, 8).toString("hex") === "89504e470d0a1a0a");
   r = await req("PUT", `/api/drafts/${did}`, JSON.stringify({ title: "再改一次" }));
   check("draft-bump-before-sensitive", r.status === 200);
-  r = await pub({ draft_id: did, title: "色情测试", png: png4, thumb: png4 });
+  r = await pub({ draft_id: did, title: "色情测试", tags: ["生物"], png: png4, thumb: png4 });
   check("publish-sensitive-pending", r.status === 201 && r.json.artwork.status === "pending");
   const pid = r.json.artwork?.id;
+  r = await req("POST", "/api/me/avatar", JSON.stringify({ artwork_id: pid }));
+  check("avatar-pending-rejected", r.status === 404);
+  r = await req("PUT", "/api/me/pet", JSON.stringify({ artwork_id: pid }));
+  check("pet-pending-rejected", r.status === 404);
+  const pdetail = await req("GET", `/api/artworks/${pid}`);
+  check("publish-tag-bio", pdetail.status === 200 && String(pdetail.json.artwork.tags || "").includes("生物"));
   r = await req("GET", "/api/gallery?tab=new");
   check("gallery-hides-pending", r.status === 200 && r.json.items.every((x) => x.id !== pid));
   r = await req("GET", "/api/gallery?tab=hot");
-  check("gallery-hot", r.status === 200 && r.json.items.some((x) => x.id === aid));
+  check("gallery-hot", r.status === 200 && r.json.items.some((x) => x.id === aid) && r.json.items.find((x) => x.id === aid)?.png_url?.startsWith("data:image/png;base64,"));
   const v1 = await req("GET", `/api/artworks/${aid}`);
   const v2 = await req("GET", `/api/artworks/${aid}`);
   check("views-dedupe", v1.json.artwork.views === v2.json.artwork.views);
   r = await req("GET", "/api/users/9999/works");
   check("user-works", r.status === 200 && Array.isArray(r.json.items));
+  r = await req("GET", `/api/users/${meId}/works`);
+  check("user-works-tags", r.status === 200 && r.json.items.every((x) => typeof x.tags === "string"));
+  r = await req("GET", `/api/users/${meId}`);
+  check("user-stats", r.status === 200 && r.json.stats.artworks === 1 && r.json.stats.likes === 0 && r.json.stats.views === 1 && r.json.stats.comments === 0);
+  r = await req("GET", "/api/users/latest");
+  check("users-latest", r.status === 200 && r.json.user?.id === bid && r.json.user?.nickname === "小黑");
   r = await req("GET", "/api/me/works");
-  check("me-works", r.status === 200 && r.json.items.length === 2);
-  r = await req("GET", "/api/admin/pending");
-  check("admin-forbidden", r.status === 403);
+  check("me-works", r.status === 200 && r.json.items.length === 2 && r.json.drafts.some((draft) => draft.id === did && draft.png_url.startsWith("data:image/png;base64,") && Buffer.from(draft.png_url.split(",", 2)[1], "base64").readUInt32BE(16) === 4));
+  r = await req("GET", "/api/admin/artworks");
+  check("admin-artworks-forbidden", r.status === 403);
   process.env.ADMIN_EMAILS = "a@b.cn";
   r = await req("GET", "/api/admin/pending");
   check("admin-pending", r.status === 200 && r.json.items.some((x) => x.id === pid));
@@ -271,6 +284,25 @@ const server = app.listen(0, async () => {
   check("admin-feature", r.status === 200);
   r = await req("GET", "/api/gallery?tab=featured");
   check("gallery-featured", r.status === 200 && r.json.items.some((x) => x.id === pid));
+  r = await req("GET", "/api/gallery?tab=new&limit=24");
+  check("gallery-featured-in-new", r.status === 200 && r.json.items.some((x) => x.id === pid));
+  r = await req("GET", "/api/gallery?tab=hot&limit=24");
+  check("gallery-featured-in-hot", r.status === 200 && r.json.items.some((x) => x.id === pid));
+  r = await req("GET", "/api/admin/artworks");
+  check("admin-artworks-featured", r.status === 200 && r.json.items.find((x) => x.id === pid)?.status === "featured");
+  r = await req("GET", `/api/admin/artworks?q=${encodeURIComponent("色情")}`);
+  check("admin-artworks-search", r.status === 200 && r.json.items.some((x) => x.id === pid) && r.json.items.every((x) => x.status !== "removed"));
+  // 管理员下架头像来源作品 → 头像恢复默认“画”
+  r = await req("POST", "/api/me/avatar", JSON.stringify({ artwork_id: pid }));
+  check("avatar-set-pid", r.status === 200);
+  r = await req("PATCH", `/api/admin/${pid}`, JSON.stringify({ status: "removed" }));
+  check("admin-remove", r.status === 200);
+  r = await req("GET", "/api/me");
+  check("avatar-reverted-admin", r.status === 200 && !r.json.user.avatar_url);
+  r = await req("GET", "/api/me");
+  check("me-is-admin", r.status === 200 && r.json.user.is_admin === true);
+  r = await req("GET", `/api/users/${bid}`);
+  check("user-not-admin", r.status === 200 && r.json.user.is_admin === false);
 
   // ---- 取消发布 ----
   r = await req("PUT", `/api/drafts/${did}`, JSON.stringify({ title: "改名 bump" }));
@@ -293,6 +325,43 @@ const server = app.listen(0, async () => {
   check("unpublish-other-forbidden", r.status === 403);
   cookie = cookieA1;
 
+  // ---- 公告板：公开读，管理员写 ----
+  cookie = "";
+  r = await req("GET", "/api/board");
+  check("board-public", r.status === 200 && r.json.board?.content === "");
+  r = await req("POST", "/api/login", JSON.stringify({ email: "b@c.cn", password: "secret12" }));
+  r = await req("PUT", "/api/board", JSON.stringify({ content: "乱写" }));
+  check("board-stranger-forbidden", r.status === 403);
+  cookie = cookieA1;
+  r = await req("PUT", "/api/board", JSON.stringify({ content: "第一期命题进行中" }));
+  check("board-admin-write", r.status === 200);
+  cookie = "";
+  r = await req("GET", "/api/board");
+  check("board-public-read", r.status === 200 && r.json.board?.content === "第一期命题进行中");
+  cookie = cookieA1;
+  r = await req("PUT", "/api/board", JSON.stringify({ content: "" }));
+  check("board-admin-clear", r.status === 200);
+  // 作者取消发布头像来源作品 → 头像恢复默认“画”；下架别的不影响
+  r = await req("PUT", `/api/drafts/${did}`, JSON.stringify({ title: "头像联动版" }));
+  r = await pub({ draft_id: did, title: "头像稿", png: png4, thumb: png4 });
+  const avid = r.json.artwork?.id;
+  r = await req("POST", "/api/me/avatar", JSON.stringify({ artwork_id: avid }));
+  check("avatar-set-tmp", r.status === 200);
+  r = await req("POST", `/api/artworks/${avid}/unpublish`);
+  check("unpublish-avatar-src", r.status === 200 && r.json.avatar_cleared === true);
+  r = await req("GET", "/api/me");
+  check("avatar-reverted", r.status === 200 && !r.json.user.avatar_url);
+  r = await req("POST", "/api/me/avatar", JSON.stringify({ artwork_id: aid }));
+  check("avatar-reset-aid", r.status === 200);
+  r = await req("PUT", `/api/drafts/${did}`, JSON.stringify({ title: "头像联动版2" }));
+  r = await pub({ draft_id: did, title: "路人稿", png: png4b, thumb: png4b });
+  r = await req("POST", `/api/artworks/${r.json.artwork?.id}/unpublish`);
+  check("unpublish-other-art", r.status === 200 && r.json.avatar_cleared !== true);
+  r = await req("GET", "/api/me");
+  check("avatar-kept", r.status === 200 && !!r.json.user.avatar_url);
+  r = await req("DELETE", "/api/me/avatar");
+  check("avatar-clear-tmp", r.status === 200);
+
   // ---- 同一版重复发布：改动后可再发 ----
   // 草稿改动（version+1）后可再发
   r = await req("PUT", `/api/drafts/${did}`, JSON.stringify({ title: "改动后" }));
@@ -300,6 +369,16 @@ const server = app.listen(0, async () => {
   r = await pub({ draft_id: did, title: "改后重发", png: png4, thumb: png4 });
   check("publish-after-edit", r.status === 201);
   const aid2b = r.json.artwork?.id;
+  const gNew = (await req("GET", "/api/gallery?tab=new&limit=24")).json.items.map((x) => x.id);
+  const gFeat = (await req("GET", "/api/gallery?tab=featured&limit=24")).json.items.map((x) => x.id);
+  const all = [...gNew, ...gFeat].sort((x, y) => y - x);
+  const ai = all.indexOf(aid2b);
+  const nb = await req("GET", `/api/artworks/${aid2b}/neighbors`);
+  check("neighbors", nb.status === 200 &&
+    (nb.json.prev?.id ?? null) === (all[ai - 1] ?? null) &&
+    (nb.json.next?.id ?? null) === (all[ai + 1] ?? null));
+  r = await req("GET", "/api/artworks/99999/neighbors");
+  check("neighbors-missing", r.status === 404);
   // 草稿列表带出软连接
   r = await req("GET", "/api/drafts");
   const dd = (r.json.drafts || []).find((x) => x.id === did);
@@ -333,6 +412,53 @@ const server = app.listen(0, async () => {
   check("edit-bad-tags", r.status === 400);
   r = await req("PATCH", `/api/artworks/${aid}`, JSON.stringify({}));
   check("edit-empty", r.status === 400);
+  // ---- 版权直选：双勾选发布/修改/二创门禁 ----
+  r = await req("PUT", `/api/drafts/${did}`, JSON.stringify({ title: "版权直选版" }));
+  check("draft-bump-before-perm", r.status === 200);
+  r = await pub({ draft_id: did, title: "双关发布", allow_download: 0, allow_remix: 0, png: png4, thumb: png4 });
+  check("publish-perm-off", r.status === 201);
+  const permId = r.json.artwork?.id;
+  r = await req("GET", `/api/artworks/${permId}`);
+  check("perm-off-shown", r.status === 200 && r.json.artwork.allow_download === 0 &&
+    r.json.artwork.allow_remix === 0 && r.json.artwork.license === "不可转载");
+  r = await req("PATCH", `/api/artworks/${permId}`, JSON.stringify({ allow_download: 1, allow_remix: 1 }));
+  check("perm-patch-on", r.status === 200 && r.json.allow_download === 1 && r.json.allow_remix === 1);
+  r = await req("GET", `/api/artworks/${permId}`);
+  check("perm-on-shown", r.status === 200 && r.json.artwork.allow_download === 1 && r.json.artwork.license === "CC-BY-NC");
+  // 关掉二创后他人 remix 应 403，打开后 201 并落草稿
+  r = await req("PATCH", `/api/artworks/${permId}`, JSON.stringify({ allow_remix: 0 }));
+  check("perm-remix-off", r.status === 200);
+  cookie = "";
+  r = await req("POST", "/api/login", JSON.stringify({ email: "b@c.cn", password: "secret12" }));
+  r = await req("POST", `/api/artworks/${permId}/remix`);
+  check("remix-forbidden", r.status === 403);
+  cookie = cookieA1;
+  r = await req("PATCH", `/api/artworks/${permId}`, JSON.stringify({ allow_remix: 1 }));
+  check("perm-remix-on", r.status === 200);
+  cookie = "";
+  r = await req("POST", "/api/login", JSON.stringify({ email: "b@c.cn", password: "secret12" }));
+  r = await req("POST", `/api/artworks/${permId}/remix`);
+  check("remix-ok", r.status === 201 && r.json.draft?.id && String(r.json.draft.title).startsWith("续作·"));
+  const remixDid = r.json.draft?.id;
+  r = await req("GET", `/api/drafts/${remixDid}`);
+  check("remix-draft", r.status === 200 && typeof r.json.draft.layers_json === "string");
+  cookie = cookieA1;
+  r = await req("GET", "/api/notifications");
+  check("notif-remix", (r.json.items || []).some((x) => x.type === "remix"));
+  // 默认发布 = 双开（CC-BY-NC）；单传 license=CC-BY-NC 也是双开
+  r = await req("PUT", `/api/drafts/${did}`, JSON.stringify({ title: "默认映射版" }));
+  check("draft-bump-before-default", r.status === 200);
+  r = await pub({ draft_id: did, title: "默认发布", png: png4, thumb: png4 });
+  check("publish-default", r.status === 201);
+  r = await req("GET", `/api/artworks/${r.json.artwork?.id}`);
+  check("publish-default-perms", r.status === 200 && r.json.artwork.allow_download === 1 &&
+    r.json.artwork.allow_remix === 1 && r.json.artwork.license === "CC-BY-NC");
+  r = await req("PUT", `/api/drafts/${did}`, JSON.stringify({ title: "映射版" }));
+  r = await pub({ draft_id: did, title: "CCBYNC发布", license: "CC-BY-NC", png: png4, thumb: png4 });
+  check("publish-ccbync", r.status === 201);
+  r = await req("GET", `/api/artworks/${r.json.artwork?.id}`);
+  check("publish-ccbync-perms", r.status === 200 && r.json.artwork.allow_download === 1 &&
+    r.json.artwork.allow_remix === 1);
   r = await req("PATCH", "/api/artworks/99999", JSON.stringify({ title: "x" }));
   check("rename-missing", r.status === 404);
   cookie = "";
@@ -354,14 +480,29 @@ const server = app.listen(0, async () => {
   r = await req("POST", `/api/artworks/${aid}/comments`, JSON.stringify({ content: "@新名字 好看！" }));
   check("comment-mention", r.status === 201);
   const cid = r.json.comment?.id;
-  r = await req("GET", `/api/artworks/${aid}/comments`);
-  check("comment-list", r.status === 200 && r.json.items.length === 1 && r.json.items[0].nickname === "小黑");
+  r = await req("GET", `/api/artworks/${aid}/comments?page=1`);
+  check("comment-list", r.status === 200 && r.json.items.length === 1 && r.json.items.some((x) => x.id === cid && x.user_id === bid));
+  check("comment-no-admin", r.json.items.find((x) => x.id === cid)?.is_admin === false);
+  for (let i = 0; i < 3; i++) {
+    r = await req("POST", `/api/artworks/${aid}/comments`, JSON.stringify({ content: `分页测试 ${i + 1}` }));
+    check(`comment-page-seed-${i + 1}`, r.status === 201);
+  }
+  r = await req("GET", `/api/artworks/${aid}/comments?page=1`);
+  check("comment-page-1", r.status === 200 && r.json.page === 1 && r.json.page_size === 4 &&
+    r.json.total === 4 && r.json.pages === 1 && r.json.items.length === 4 && r.json.has_next === false);
+  r = await req("POST", `/api/artworks/${aid}/comments`, JSON.stringify({ content: "分页测试 4" }));
+  check("comment-page-seed-4", r.status === 201);
+  r = await req("GET", `/api/artworks/${aid}/comments?page=2`);
+  check("comment-page-2", r.status === 200 && r.json.page === 2 && r.json.items.length === 1 &&
+    r.json.has_prev === true && r.json.has_next === false);
   cookie = cookieA2;
   r = await req("GET", "/api/notifications");
   const types = (r.json.items || []).map((x) => x.type);
   check("notif-like-comment", r.status === 200 && types.includes("like") && types.includes("comment") && types.includes("mention"));
   r = await req("POST", `/api/artworks/${aid}/comments`, JSON.stringify({ content: "谢谢！", parent_id: cid }));
   check("comment-reply", r.status === 201);
+  r = await req("GET", `/api/artworks/${aid}/comments?page=2`);
+  check("comment-admin", r.json.items.some((x) => x.content === "谢谢！" && x.is_admin === true));
   cookie = "";
   r = await req("POST", "/api/login", JSON.stringify({ email: "b@c.cn", password: "secret12" }));
   r = await req("GET", "/api/notifications");
@@ -381,6 +522,11 @@ const server = app.listen(0, async () => {
   r = await req("POST", "/api/login", JSON.stringify({ email: "b@c.cn", password: "secret12" }));
   r = await req("DELETE", `/api/comments/${acid}`);
   check("comment-delete-stranger", r.status === 403);
+  cookie = cookieA1;
+  r = await req("DELETE", `/api/comments/${acid}`);
+  check("comment-delete-as-admin", r.status === 200);
+  r = await req("GET", `/api/artworks/${aid}/comments`);
+  check("comment-gone-admin", r.json.items.every((x) => x.id !== acid));
   cookie = cookieA2;
   r = await req("POST", "/api/blocks", JSON.stringify({ user_id: bid }));
   check("block-b", r.status === 201);
@@ -391,7 +537,9 @@ const server = app.listen(0, async () => {
   r = await req("POST", `/api/artworks/${aid}/comments`, JSON.stringify({ content: "hi" }));
   check("comment-blocked", r.status === 403);
   cookie = cookieA2;
-  r = await req("DELETE", `/api/comments/${acid}`);
+  r = await req("POST", `/api/artworks/${aid}/comments`, JSON.stringify({ content: "作者再留一条" }));
+  const acid2 = r.json.comment?.id;
+  r = await req("DELETE", `/api/comments/${acid2}`);
   check("comment-delete-own-2", r.status === 200);
   r = await req("DELETE", `/api/artworks/${aid}/like`);
   check("unlike", r.status === 200 && r.json.likes_count === 1);
@@ -402,6 +550,21 @@ const server = app.listen(0, async () => {
   const { db: tdb } = await import("./db.js");
   const deadTables = tdb.prepare("SELECT COUNT(*) c FROM sqlite_master WHERE type='table' AND name IN ('follows','favorites')").get().c;
   check("drop-dead-tables", deadTables === 0);
+  // 热门排序：浏览 / 点赞 / 评论；非法 sort 回落到综合
+  const pubWorks = tdb.prepare("SELECT id FROM artworks WHERE status = 'normal' ORDER BY id").all();
+  check("gallery-hot-sort-seed", pubWorks.length >= 3);
+  const [wViews, wLikes, wComments] = pubWorks;
+  tdb.prepare("UPDATE artworks SET views = 90, likes_count = 1, comments_count = 1 WHERE id = ?").run(wViews.id);
+  tdb.prepare("UPDATE artworks SET views = 10, likes_count = 80, comments_count = 2 WHERE id = ?").run(wLikes.id);
+  tdb.prepare("UPDATE artworks SET views = 20, likes_count = 3, comments_count = 70 WHERE id = ?").run(wComments.id);
+  const hotViews = (await req("GET", "/api/gallery?tab=hot&sort=views&limit=24")).json.items;
+  const hotLikes = (await req("GET", "/api/gallery?tab=hot&sort=likes&limit=24")).json.items;
+  const hotCmts = (await req("GET", "/api/gallery?tab=hot&sort=comments&limit=24")).json.items;
+  check("gallery-hot-sort-views", hotViews[0]?.id === wViews.id);
+  check("gallery-hot-sort-likes", hotLikes[0]?.id === wLikes.id);
+  check("gallery-hot-sort-comments", hotCmts[0]?.id === wComments.id);
+  r = await req("GET", "/api/gallery?tab=hot&sort=nope");
+  check("gallery-hot-sort-fallback", r.status === 200 && Array.isArray(r.json.items));
   tdb.prepare("INSERT INTO events (user_id, name, created_at) VALUES (NULL, 'visit', datetime('now', '-100 days'))").run();
   const { logEvent } = await import("./analytics.js");
   const oldRandom = Math.random;
@@ -438,8 +601,35 @@ const server = app.listen(0, async () => {
   check("avatar-in-me", r.status === 200 && !!r.json.user.avatar_url);
   r = await req("DELETE", "/api/me/avatar");
   check("avatar-clear", r.status === 200);
+  r = await req("POST", "/api/me/avatar", JSON.stringify({ draft_id: did, image: png4 }));
+  check("avatar-reject-draft", r.status === 400 && r.json.error === "published_artwork_required");
   r = await req("GET", "/api/me");
-  check("avatar-cleared", r.status === 200 && !r.json.user.avatar_url);
+  check("avatar-draft-not-applied", r.status === 200 && !r.json.user.avatar_url);
+  r = await req("DELETE", "/api/me/avatar");
+  check("avatar-clear-after-draft-attempt", r.status === 200);
+  r = await req("PUT", "/api/me/pet", JSON.stringify({ artwork_id: 9999 }));
+  check("pet-missing", r.status === 404);
+  r = await req("PUT", "/api/me/pet", JSON.stringify({ artwork_id: aid, flip: true }));
+  check("pet-set", r.status === 200 && r.json.pet.artwork_id === aid && r.json.pet.flip === 1 && r.json.pet.png_url.startsWith("data:image/png"));
+  r = await req("GET", `/api/users/${meId}`);
+  check("pet-public", r.status === 200 && r.json.pet.artwork_id === aid && r.json.pet.flip === 1);
+  r = await req("PUT", "/api/me/pet", JSON.stringify({ artwork_id: 0 }));
+  check("pet-clear", r.status === 200 && r.json.pet === null);
+  // 宠物只接受已发布作品，拒绝草稿参数
+  r = await req("PUT", "/api/me/pet", JSON.stringify({ draft_id: 9999 }));
+  check("pet-reject-missing-draft", r.status === 400 && r.json.error === "published_artwork_required");
+  r = await req("PUT", "/api/me/pet", JSON.stringify({ draft_id: did }));
+  check("pet-reject-draft", r.status === 400 && r.json.error === "published_artwork_required");
+  r = await req("GET", `/api/users/${meId}`);
+  check("pet-draft-not-applied", r.status === 200 && r.json.pet === null);
+  r = await req("PUT", "/api/me/pet", JSON.stringify({ artwork_id: 0 }));
+  check("pet-clear-after-draft-attempt", r.status === 200 && r.json.pet === null);
+  const { db: testDb } = await import("./db.js");
+  testDb.prepare("UPDATE users SET avatar_url = ?, pet_artwork_id = ?, pet_kind = 'draft' WHERE id = ?")
+    .run("data:image/png;base64,legacy", did, meId);
+  r = await req("GET", "/api/me");
+  check("legacy-draft-avatar-cleared", r.status === 200 && !r.json.user.avatar_url && r.json.pet === null);
+  check("legacy-draft-pet-cleared", testDb.prepare("SELECT pet_artwork_id FROM users WHERE id = ?").get(meId).pet_artwork_id === null);
   // 一键清空
   r = await req("DELETE", "/api/notifications");
   const empty = await req("GET", "/api/notifications");

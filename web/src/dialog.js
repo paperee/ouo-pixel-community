@@ -59,12 +59,13 @@ function ensure() {
   return els;
 }
 
-export function uiDialog({ title = "请确认", msg = "", input = null, okText = "确定", choices = null } = {}) {
+export function uiDialog({ title = "请确认", msg = "", input = null, okText = "确定", cancelText = "取消", choices = null } = {}) {
   const d = ensure();
   return new Promise((resolve) => {
     d.title.textContent = title;
     d.msg.textContent = msg;
     d.ok.textContent = okText;
+    d.cancel.textContent = cancelText;
     const useChoices = Array.isArray(choices) && choices.length > 0;
     const useInput = !useChoices && input !== null && input !== undefined;
     d.input.hidden = !useInput;
@@ -107,6 +108,7 @@ export function uiDialog({ title = "请确认", msg = "", input = null, okText =
 export const uiAlert = (msg) => uiDialog({ title: "提示", msg, okText: "知道了" });
 export const uiConfirm = (msg, okText = "确定") => uiDialog({ title: "请确认", msg, okText });
 export const uiPrompt = (msg, def = "") => uiDialog({ title: "输入", msg, input: def });
+export const uiNotice = (msg) => uiDialog({ title: "社区公告", msg, okText: "确认", cancelText: "不再显示" });
 // 三选一（备份位满时用）：resolve 选中项的 value，Esc/点遮罩算 null
 export const uiChoice = ({ title = "请选择", msg = "", choices = [] } = {}) =>
   uiDialog({ title, msg, choices });

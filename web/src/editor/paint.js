@@ -174,8 +174,8 @@ export function hexToRgba(hex) {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255, 255];
 }
 
-// 封面缩略图：最近邻缩小到 max 以内，返回原始 RGBA 的 base64（纯函数，可单测）
-export function coverOf(pixels, w, h, max = 48) {
+// 封面像素数据：默认保留原始画布尺寸，传 max 时才缩放
+export function coverOf(pixels, w, h, max = Math.max(w, h)) {
   const s = Math.min(1, max / Math.max(w, h));
   const cw = Math.max(1, Math.round(w * s));
   const ch = Math.max(1, Math.round(h * s));

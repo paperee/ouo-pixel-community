@@ -13,14 +13,14 @@ export function pageHome(user) {
           <a href="#/draw" class="px-btn px-btn--cherry">打开画布试画</a>
           <a href="#/register" class="px-btn">注册后保存发布</a>
         </div>`;
-  const hello = user ? `<p class="hint">欢迎回来，${esc(user.nickname)}，今天画点什么呢？</p>` : `<p class="hint">对新手友好的像素画编辑器 + 作品社区。由热爱像素画的社区驱动。</p>`;
+  const hello = user ? `<p class="hint">欢迎回家，${esc(user.nickname)}，今天想做什么呢？</p>` : `<p class="hint">简洁的像素画编辑器 + 作品社区。由热爱像素画的社区驱动。</p>`;
   const tip = HOME_TIPS[new Date().getDate() % HOME_TIPS.length];
   return `
     <main class="wrap wide">
       <div class="hero-mini">
         <div>
           <div class="auth-pixels" aria-hidden="true" data-home-egg><i style="background:var(--accent)"></i><i style="background:var(--sky)"></i><i style="background:#2eb5a8"></i><i style="background:#f5a623"></i></div>
-          <h1 class="px-title hero">${user ? "在社区里，找找灵感" : "打开就能画，画完就能发"}</h1>
+          <h1 class="px-title hero">${user ? "在社区里，找找新灵感" : "有趣的作品，万里挑一"}</h1>
           ${hello}
           <p class="hint" data-daily-tip>小贴士：${tip}</p>
         </div>
@@ -30,6 +30,14 @@ export function pageHome(user) {
         <button class="tool-btn active" data-tab="new">最新</button>
         <button class="tool-btn" data-tab="hot">热门</button>
         <button class="tool-btn" data-tab="featured">精选</button>
+        <div class="gallery-sort-control" data-hot-sorts hidden>
+          <select id="gallery-sort" aria-label="热门作品排序">
+            <option value="hot">综合</option>
+            <option value="views">浏览数量</option>
+            <option value="likes">点赞数量</option>
+            <option value="comments">评论数量</option>
+          </select>
+        </div>
       </div>
       <div class="art-grid" id="gallery"><p class="hint">读取中…</p></div>
       <p class="hint" id="gallery-end" hidden>到底啦，去发一张吧</p>
@@ -40,14 +48,15 @@ export function artCard(a) {
   return `
     <div class="art-card px-card" data-art="${a.id}">
       <a href="#/art/${a.id}" style="display:contents">
-        <img src="${a.thumb_url}" alt="${esc(a.title)}" loading="lazy" data-gal="${a.id}">
+        <img src="${a.png_url}" alt="${esc(a.title)}" loading="lazy" data-gal="${a.id}">
       </a>
-      <b><a href="#/art/${a.id}" style="color:inherit;text-decoration:none">${esc(a.title)}</a></b>
+      <b><a href="#/art/${a.id}" class="ellipsis-1" style="color:inherit;text-decoration:none" title="${esc(a.title)}">${esc(a.title)}</a></b>
       <span class="hint" style="display:block">浏览 ${a.views} · 点赞 ${a.likes_count} · 评论 ${a.comments_count}</span>
     </div>`;
 }
 
 let galleryTab = "new";
+let gallerySort = "hot";
 let galleryPage = 1;
 let galleryHasMore = true;
 let galleryLoading = false;
@@ -95,7 +104,8 @@ export async function loadGallery(more = false) {
   }
   if (more && !galleryHasMore) return;
   galleryLoading = true;
-  const r = await api("GET", `/api/gallery?tab=${galleryTab}&page=${galleryPage}&limit=12`);
+  const sortQ = galleryTab === "hot" ? `&sort=${gallerySort}` : "";
+  const r = await api("GET", `/api/gallery?tab=${galleryTab}&page=${galleryPage}&limit=12${sortQ}`);
   galleryLoading = false;
   if (r.status !== 200 || !r.data) {
     box.innerHTML = `<div class="px-card">画廊开小差了，刷新试试。</div>`;
@@ -129,11 +139,25 @@ export function wireGalleryInfinite() {
 export function wireGalleryTabs() {
   const tabs = document.querySelector("[data-tabs]");
   if (!tabs) return;
+  const sorts = document.querySelector("[data-hot-sorts]");
+  const sortSelect = document.querySelector("#gallery-sort");
+  if (sortSelect) sortSelect.value = gallerySort;
+  const syncSorts = () => {
+    if (sorts) sorts.hidden = galleryTab !== "hot";
+  };
+  syncSorts();
   tabs.onclick = (e) => {
     const b = e.target.closest("[data-tab]");
     if (!b) return;
     galleryTab = b.dataset.tab;
     tabs.querySelectorAll("[data-tab]").forEach((x) => x.classList.toggle("active", x === b));
+    syncSorts();
     loadGallery(false);
   };
+  if (!sortSelect) return;
+  sortSelect.addEventListener("change", () => {
+    if (galleryTab !== "hot") return;
+    gallerySort = sortSelect.value;
+    loadGallery(false);
+  });
 }

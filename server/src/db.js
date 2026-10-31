@@ -104,6 +104,14 @@ CREATE TABLE IF NOT EXISTS blocks (
   PRIMARY KEY (blocker_id, blocked_id)
 );
 
+-- 公告板：单行（id=1），管理员编辑，所有人可见
+CREATE TABLE IF NOT EXISTS board (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  content TEXT NOT NULL DEFAULT '',
+  updated_by INTEGER REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER REFERENCES users(id),
@@ -131,6 +139,14 @@ for (const sql of [
   "ALTER TABLE artworks ADD COLUMN draft_version INTEGER DEFAULT 1",
   "ALTER TABLE artworks ADD COLUMN layers_json TEXT DEFAULT '[]'",
   "ALTER TABLE draft_versions ADD COLUMN kind TEXT NOT NULL DEFAULT 'manual'",
+  // 版权直选：可下载 / 可二创（老库 license='不可转载' 回填为双关）
+  "ALTER TABLE artworks ADD COLUMN allow_download INTEGER NOT NULL DEFAULT 1",
+  "ALTER TABLE artworks ADD COLUMN allow_remix INTEGER NOT NULL DEFAULT 1",
+  "ALTER TABLE drafts ADD COLUMN fork_from_id INTEGER",
+  "UPDATE artworks SET allow_download = 0, allow_remix = 0 WHERE license = '不可转载'",
+  "ALTER TABLE users ADD COLUMN pet_artwork_id INTEGER",
+  "ALTER TABLE users ADD COLUMN pet_flip INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE users ADD COLUMN pet_kind TEXT NOT NULL DEFAULT 'artwork'",
   // follows / favorites 从未有任何读写（0 行），直接删表
   "DROP TABLE IF EXISTS follows",
   "DROP TABLE IF EXISTS favorites",

@@ -1,4 +1,6 @@
 // 社区指南：站点信息 / 站点特色 / 使用说明（三页翻页，内容与 OuO像素画社区·Beta版.md 对齐）
+import { api } from "../api.js";
+import { esc } from "./shared.js";
 export const GUIDE_TABS = [
   { id: "info", label: "站点信息", lead: "OuO像素画社区之入站指南。" },
   { id: "features", label: "站点特色", lead: "本站对比其他同类网站有哪些特色。" },
@@ -18,8 +20,8 @@ function pageInfo() {
   return `
     <div class="px-card guide-block fact-hero">
       <p class="fact-kicker">网页像素画编辑器 + 作品社区</p>
-      <p class="fact-big">打开就能画，${mark("画完就能发")}</p>
-      <p class="hint" style="margin:0">Beta版：实现了大部分预期的功能，BUG仍在测试中。</p>
+      <p class="fact-big">有趣的作品，${mark("万里挑一")}</p>
+      <p class="hint" style="margin:0">哇塞，你居然看到了这里。文案写什么好呢…</p>
     </div>
     <div class="fact-grid">
       <div class="px-card fact">
@@ -33,18 +35,18 @@ function pageInfo() {
     </div>
     <div class="px-card guide-block">
       <p class="fact-label">技术栈</p>
-      <p class="fact-text">前端原生Canvas，后端Node.js，数据库暂定SQLite，缩略图缓存本地，字体为自托管的Fusion Pixel。</p>
+      <p class="fact-text">前端原生 Canvas，后端 Node.js + Express，数据库暂定 SQLite，缩略图缓存本地，字体为自托管的 Fusion Pixel。</p>
       <div class="tag-row"><span>Canvas</span><span>Node</span><span>SQLite</span><span>Fusion Pixel</span></div>
     </div>`;
 }
 
 function pageFeatures() {
   const items = [
-    ["版本管理", "有1个自动存档以及15个手动存档，在手动存档满了的时候，你可以选择另存作品为副本，让手动存档重新开始计数，也可以选择直接删除最旧的存档再保存。", "hero"],
-    ["Z 快捷键", `特别好用的快捷键，你可以在很多地方见到它，包括但不限于：对着小图使用，显示清晰的大图；对着作品使用，显示颜色与图层。`, "hero"],
-    ["悬停提示框", "基本上，悬停在任何按钮上，都会出现一个跟手的提示框。尤其在画画页中，提示框内有工具的用途和快捷键。"],
-    ["站内生态", "虽然没有关注作者的功能，但你可以给作者的作品点赞或发表评论，让作者知道有人喜欢ta的作品OuO。"],
-    ["颜色与图层", "你可以在作品页中，查看作品的肉眼配色与图层拆分（不包含原始配色、图层透明度与叠加模式）。"],
+    ["版本管理", "每个作品都可以使用 1 个自动存档和 15 个手动存档。若提示手动存档不够，你可以选择另存作品为副本，使用新的空存档，也可以选择删除掉最旧的存档，再把进度保存到最后面的手动存档。", "hero"],
+    ["Z 快捷键", `你可以在很多地方悬停鼠标后，长按键盘上的 Z 键（在手机等无法使用鼠标的设备上则是长按）。用途包括但不限于：对着小图使用，显示清晰的大图；对着作品使用，显示颜色与图层。`, "hero"],
+    ["悬停提示框", "鼠标悬停在大多数按钮上时，会出现一个跟手的提示框。尤其在绘画页中十分方便。提示框会告诉你工具的用途和键盘快捷键。"],
+    ["站内生态", "还没有关注作者的功能，但你可以给作者的作品点赞或评论，让作者知道有人喜欢 ta 的作品 OuO。共同维护一个和谐有爱的社区~"],
+    ["颜色与图层", "你可以在作品页中，看到画作中的主要颜色与图层拆分（不包含原始配色、图层透明度与叠加模式）。仅供学习和参考噢~"],
   ];
   const hero = items.filter((x) => x[2] === "hero");
   const rest = items.filter((x) => x[2] !== "hero");
@@ -126,6 +128,7 @@ export function pageGuide(id) {
     <main class="wrap guide">
       <h1 class="px-title guide-title">社区指南</h1>
       <p class="guide-lead">${GUIDE_TABS[i].lead}</p>
+      <div id="board-root" class="px-card guide-block guide-board"><p class="hint">公告读取中…</p></div>
       <div class="row tabs guide-tabs" role="tablist">
         ${GUIDE_TABS.map((t) => `<a href="#/guide/${t.id}" role="tab" aria-selected="${t.id === cur}" class="tool-btn${t.id === cur ? " active" : ""}">${t.label}</a>`).join("")}
       </div>
@@ -150,4 +153,59 @@ export function wireGuide() {
     if (e.key === "ArrowLeft") location.hash = `#/guide/${GUIDE_TABS[(i + GUIDE_TABS.length - 1) % GUIDE_TABS.length].id}`;
   };
   window.addEventListener("keydown", window.__pxGuideKey);
+}
+
+// 公告板：所有人可见，管理员可编辑保存（每进指南页刷一次）
+export async function mountBoard(user) {
+  const root = document.querySelector("#board-root");
+  if (!root) return;
+  const r = await api("GET", "/api/board");
+  const content = r.status === 200 ? r.data.board?.content || "" : "";
+  const updated = r.status === 200 ? r.data.board?.updated_at : null;
+  const render = (editing) => {
+    if (!editing) {
+      root.classList.remove("guide-board--editing");
+      root.innerHTML = `
+        <div class="guide-board__header">
+          <div class="guide-board__identity">
+            <span class="guide-board__icon" aria-hidden="true">!</span>
+            <div>
+              <p class="guide-board__eyebrow">COMMUNITY NOTICE</p>
+              <p class="fact-label">公告板</p>
+            </div>
+          </div>
+          ${updated ? `<span class="guide-board__updated hint">更新于 ${esc(updated.slice(0, 16))}</span>` : `<span class="guide-board__updated hint">社区公告</span>`}
+        </div>
+        <div class="guide-board__body">
+          ${content ? `<p class="guide-board__message">${esc(content)}</p>` : `<p class="guide-board__empty hint">暂无公告。</p>`}
+        </div>
+        ${user?.is_admin ? `<div class="row guide-board__actions"><button class="px-btn px-btn--sm px-btn--grape" id="board-edit">编辑公告</button></div>` : ""}`;
+      root.querySelector("#board-edit")?.addEventListener("click", () => render(true));
+    } else {
+      root.classList.add("guide-board--editing");
+      root.innerHTML = `
+        <div class="guide-board__header">
+          <div class="guide-board__identity">
+            <span class="guide-board__icon" aria-hidden="true">✎</span>
+            <div>
+              <p class="guide-board__eyebrow">EDIT NOTICE</p>
+              <p class="fact-label">编辑公告</p>
+            </div>
+          </div>
+          <span class="guide-board__updated hint">最多 2000 字</span>
+        </div>
+        <textarea class="px-input guide-board__textarea" id="board-text" rows="6" maxlength="2000" placeholder="写点公告…">${esc(content)}</textarea>
+        <div class="row guide-board__actions">
+          <button class="px-btn px-btn--sm px-btn--grape" id="board-save">保存公告</button>
+          <button class="px-btn px-btn--sm" id="board-cancel">取消</button>
+        </div>`;
+      root.querySelector("#board-cancel").addEventListener("click", () => render(false));
+      root.querySelector("#board-save").addEventListener("click", async () => {
+        const text = root.querySelector("#board-text").value;
+        const sr = await api("PUT", "/api/board", JSON.stringify({ content: text }));
+        if (sr.status === 200) mountBoard(user);
+      });
+    }
+  };
+  render(false);
 }

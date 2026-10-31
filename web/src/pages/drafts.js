@@ -1,24 +1,64 @@
 // 草稿箱：列表/版本/发布/回滚/行内操作
 import { api, track } from "../api.js";
-import { b64ToU8, composite, deserialize } from "../editor/doc.js";
-import { coverOf } from "../editor/paint.js";
+import { composite, deserialize, u8ToB64 } from "../editor/doc.js";
 import { uiAlert, uiChoice, uiConfirm, uiPrompt } from "../dialog.js";
-import { ART_LICENSES, ART_TAGS, esc } from "./shared.js";
+import { ART_TAGS, PERM_OPTIONS, esc, flagsOf } from "./shared.js";
 import { canvasToB64, extractPalette } from "./image.js";
+import { DRAFTS_PER_PAGE, getDraftPage } from "./draft-pagination.js";
+import { getPagerKeyboardPage } from "./pagination-keyboard.js";
+
+let currentDraftPage = 1;
+let latestDraftLoad = 0;
+
+function draftPreviewUrl(draft) {
+  try {
+    const doc = deserialize(draft?.layers_json || "");
+    if (doc.w !== draft.canvas_w || doc.h !== draft.canvas_h) return "";
+    return canonicalPng(composite(doc), doc.w, doc.h);
+  } catch {
+    return "";
+  }
+}
+
+function canonicalPng(pixels, width, height) {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(pixels), width, height), 0, 0);
+  return canvas.toDataURL("image/png");
+}
+document.addEventListener("keydown", (e) => {
+  if (!window.location.hash.startsWith("#/drafts")) return;
+  const pager = document.querySelector("#draft-list .draft-pager");
+  const nextPage = getPagerKeyboardPage(e, currentDraftPage, Number(pager?.dataset.pages), {
+    enabled: !!pager,
+    dialogOpen: !!document.querySelector("[data-dlg]:not([hidden])"),
+  });
+  if (nextPage === null) return;
+  e.preventDefault();
+  currentDraftPage = nextPage;
+  loadDrafts();
+});
 
 export async function loadDrafts() {
   const box = document.querySelector("#draft-list");
   if (!box) return;
+  const loadId = ++latestDraftLoad;
   const r = await api("GET", "/api/drafts");
+  if (loadId !== latestDraftLoad || !box.isConnected) return;
   if (r.status !== 200 || !r.data) {
     box.innerHTML = `<div class="px-card">读不出来，刷新试试。</div>`;
     return;
   }
-  if (!r.data.drafts.length) {
+  const drafts = r.data.drafts || [];
+  if (!drafts.length) {
+    currentDraftPage = 1;
     box.innerHTML = `<div class="px-card empty-wall">空空如也，去画第一张吧<a href="#/draw" class="px-btn px-btn--cherry">开始作画</a></div>`;
     return;
   }
-  box.innerHTML = r.data.drafts
+  const { items, page, pages, total } = getDraftPage(drafts, currentDraftPage);
+  currentDraftPage = page;
+  box.innerHTML = items
     .map(
       (d) => {
         // 发布按钮状态即提示：已发布→可点跳去作品；有改动→红色"重新发布"；未发布→默认
@@ -30,9 +70,9 @@ export async function loadDrafts() {
             ? `<button class="px-btn px-btn--sm px-btn--cherry" data-pub title="草稿有改动，可以再发布一次">重新发布</button>`
             : `<button class="px-btn px-btn--sm" data-pub>发布</button>`;
         return `
-    <div class="px-card draft-row" data-id="${d.id}">
-      <canvas class="draft-thumb" width="48" height="48"></canvas>
-      <div>
+    <div class="px-card draft-row" data-id="${d.id}" data-pub-id="${d.published_artwork_id || ''}">
+      <img class="draft-thumb" src="${draftPreviewUrl(d)}" alt="${esc(d.title)}">
+      <div class="draft-meta draft-meta--right">
         <b>${esc(d.title)}</b>
         <p class="hint">${d.canvas_w}×${d.canvas_h} · v${d.version} · ${esc(d.updated_at)}</p>
         <div class="ver-list stack" data-vers hidden></div>
@@ -54,10 +94,9 @@ export async function loadDrafts() {
       <div class="stack" data-pub-form hidden style="flex-basis:100%">
         <label class="fld"><span>标题</span><input class="px-input" data-p-title maxlength="40" value="${esc(d.title)}"></label>
         <label class="fld"><span>简介（500字内）</span><textarea class="px-input" data-p-desc maxlength="500" rows="2"></textarea></label>
+        <p class="draft-sub">分类（可多选）</p>
         <div class="row">${ART_TAGS.map((t) => `<label class="tool-lab"><input type="checkbox" data-p-tag value="${t}"> ${t}</label>`).join("")}</div>
-        <label class="tool-lab">版权协议
-          <select data-p-lic>${ART_LICENSES.map((l) => `<option${l === "CC-BY-NC" ? " selected" : ""}>${l}</option>`).join("")}</select>
-        </label>
+        <div class="row"><span class="hint"><b>版权（勾选即允许）</b></span>${PERM_OPTIONS.map((p) => `<label class="tool-lab" title="${p.hint}"><input type="checkbox" data-p-perm="${p.key}"> ${p.label}</label>`).join("")}</div>
         <div class="row">
           <button class="px-btn px-btn--sm px-btn--cherry" data-pub-go>发布</button>
           <button class="px-btn px-btn--sm" data-pub-cancel>取消</button>
@@ -68,35 +107,16 @@ export async function loadDrafts() {
       }
     )
     .join("");
-  box.querySelectorAll(".draft-row").forEach(async (row) => {
-    const d = r.data.drafts.find((x) => String(x.id) === row.dataset.id);
-    const cv = row.querySelector(".draft-thumb");
-    const paintCover = (w, h, u8) => {
-      cv.width = w;
-      cv.height = h;
-      cv.getContext("2d").putImageData(new ImageData(u8, w, h), 0, 0);
-    };
-    try {
-      let cov = null;
-      try {
-        cov = JSON.parse(d?.cover || "");
-      } catch {
-        cov = null; // 空字符串不是合法 JSON，当无封面处理
-      }
-      if (cov?.data) {
-        paintCover(cov.w, cov.h, b64ToU8(cov.data));
-        return;
-      }
-      // 存量无封面草稿（游客迁移的老数据）：拉一次全文现场渲染
-      const full = await api("GET", `/api/drafts/${d.id}`);
-      const doc = deserialize(full.data?.draft?.layers_json || "");
-      const m = composite(doc);
-      const c = coverOf(m, doc.w, doc.h);
-      paintCover(c.w, c.h, b64ToU8(c.data));
-    } catch {
-      /* 无封面就留空 */
-    }
-  });
+  box.insertAdjacentHTML(
+    "beforeend",
+    `<div class="row draft-pager" data-page="${page}" data-pages="${pages}" style="justify-content:space-between;align-items:center" aria-label="草稿翻页（可用左右方向键）">
+      <span class="hint" aria-live="polite">共 ${total} 份草稿 · 每页 ${DRAFTS_PER_PAGE} 个 · 第 ${page} / ${pages} 页 · ←/→ 翻页</span>
+      <div class="row" style="justify-content:flex-end">
+        <button class="px-btn px-btn--sm" data-draft-page="${page - 1}" aria-label="上一页"${page === 1 ? " disabled" : ""}>上一页</button>
+        <button class="px-btn px-btn--sm" data-draft-page="${page + 1}" aria-label="下一页"${page === pages ? " disabled" : ""}>下一页</button>
+      </div>
+    </div>`
+  );
 }
 export const PUB_STATUS = { pending: "待审核", normal: "展示中", featured: "精选" };
 
@@ -108,7 +128,8 @@ export async function loadPublished() {
     box.innerHTML = `<div class="px-card">读不出来，刷新试试。</div>`;
     return;
   }
-  const items = r.data.items.filter((w) => w.status !== "removed");
+  const published = r.data.items.filter((work) => work.status !== "removed");
+    const items = published.map((work) => ({ ...work, kind: "artwork" }));
   if (!items.length) {
     box.innerHTML = `<div class="px-card empty-wall">还没有发布过作品，挑一份草稿发一张吧</div>`;
     return;
@@ -121,10 +142,11 @@ export async function loadPublished() {
       } catch {
         tagList = [];
       }
+      const { dl, rm } = flagsOf(w);
       return `
     <div class="px-card draft-row" data-pid="${w.id}">
-      <img class="draft-thumb" src="${w.thumb_url}" alt="${esc(w.title)}">
-      <div>
+      <img class="draft-thumb" src="${w.png_url}" alt="${esc(w.title)}">
+      <div class="draft-meta">
         <b>${esc(w.title)}</b>
         <p class="hint">${PUB_STATUS[w.status] || w.status} · 浏览 ${w.views} · 点赞 ${w.likes_count} · 评论 ${w.comments_count}</p>
       </div>
@@ -136,10 +158,9 @@ export async function loadPublished() {
       <div class="stack" data-edit-form hidden style="flex-basis:100%">
         <label class="fld"><span>标题</span><input class="px-input" data-f-title maxlength="40" value="${esc(w.title)}"></label>
         <label class="fld"><span>简介（500字内）</span><textarea class="px-input" data-f-desc maxlength="500" rows="2">${esc(w.description || "")}</textarea></label>
+        <p class="draft-sub">分类（可多选）</p>
         <div class="row">${ART_TAGS.map((t) => `<label class="tool-lab"><input type="checkbox" data-f-tag value="${t}"${tagList.includes(t) ? " checked" : ""}> ${t}</label>`).join("")}</div>
-        <label class="tool-lab">版权协议
-          <select data-f-lic>${ART_LICENSES.map((l) => `<option${l === w.license ? " selected" : ""}>${l}</option>`).join("")}</select>
-        </label>
+        <div class="row"><span class="hint"><b>版权（勾选即允许）</b></span><label class="tool-lab"><input type="checkbox" data-f-perm="allow_download"${dl ? " checked" : ""}> 可以下载</label><label class="tool-lab"><input type="checkbox" data-f-perm="allow_remix"${rm ? " checked" : ""}> 可以续画</label></div>
         <div class="row">
           <button class="px-btn px-btn--sm px-btn--cherry" data-save-edit>保存</button>
           <button class="px-btn px-btn--sm" data-cancel-edit>取消</button>
@@ -169,6 +190,7 @@ export async function loadPublished() {
         msg.textContent = "起个标题吧";
         return;
       }
+      const perm = (k) => card.querySelector(`[data-f-perm="${k}"]`)?.checked ? 1 : 0;
       const rr = await api(
         "PATCH",
         `/api/artworks/${pid}`,
@@ -176,7 +198,8 @@ export async function loadPublished() {
           title,
           description: card.querySelector("[data-f-desc]").value,
           tags: [...card.querySelectorAll("[data-f-tag]:checked")].map((x) => x.value),
-          license: card.querySelector("[data-f-lic]").value,
+          allow_download: perm("allow_download"),
+          allow_remix: perm("allow_remix"),
         })
       );
       if (rr.status === 200) loadPublished();
@@ -221,7 +244,7 @@ export async function publishRow(row, draftId) {
     cv.width = doc.w;
     cv.height = doc.h;
     cv.getContext("2d").putImageData(new ImageData(merged, doc.w, doc.h), 0, 0);
-    const s = Math.min(1, 200 / Math.max(doc.w, doc.h));
+    const s = 1;
     const th = document.createElement("canvas");
     th.width = Math.max(1, Math.round(doc.w * s));
     th.height = Math.max(1, Math.round(doc.h * s));
@@ -229,6 +252,10 @@ export async function publishRow(row, draftId) {
     tctx.imageSmoothingEnabled = false;
     tctx.drawImage(cv, 0, 0, th.width, th.height);
     const [png, thumb] = [await canvasToB64(cv), await canvasToB64(th)];
+    const perm = (k) => {
+      const c = row.querySelector(`[data-p-perm="${k}"]`);
+      return c ? (c.checked ? 1 : 0) : 1; // 发布表单已无版权勾选，缺省双开（与服务端一致）
+    };
     const pr = await api(
       "POST",
       "/api/artworks",
@@ -237,7 +264,8 @@ export async function publishRow(row, draftId) {
         title,
         description: row.querySelector("[data-p-desc]").value,
         tags: [...row.querySelectorAll("[data-p-tag]:checked")].map((x) => x.value),
-        license: row.querySelector("[data-p-lic]").value,
+        allow_download: perm("allow_download"),
+        allow_remix: perm("allow_remix"),
         palette: extractPalette(merged),
         png,
         thumb,
@@ -301,6 +329,12 @@ export async function ensureDraftSlot(draftId) {
 export function wireDrafts() {
   const box = document.querySelector("#draft-list");
   box.onclick = async (e) => {
+    const pageButton = e.target.closest("[data-draft-page]");
+    if (pageButton && !pageButton.disabled) {
+      currentDraftPage = Number(pageButton.dataset.draftPage);
+      await loadDrafts();
+      return;
+    }
     const row = e.target.closest("[data-id]");
     if (!row) return;
     const id = row.dataset.id;
@@ -314,6 +348,21 @@ export function wireDrafts() {
     } else if (e.target.closest("[data-pub]")) {
       const form = row.querySelector("[data-pub-form]");
       form.hidden = !form.hidden;
+      // 重新发布：默认填上次发布的信息，标题缀“ 新版”（每行只回填一次，不覆盖用户手改）
+      if (!form.hidden && row.dataset.pubId && !form.dataset.prefilled) {
+        form.dataset.prefilled = "1";
+        api("GET", `/api/artworks/${row.dataset.pubId}`).then((rr) => {
+          if (rr.status !== 200 || !rr.data?.artwork || !form.isConnected) return;
+          const a = rr.data.artwork;
+          const t = row.querySelector("[data-p-title]");
+          if (t) t.value = `${a.title || ""} 新版`.slice(0, 40);
+          const desc = row.querySelector("[data-p-desc]");
+          if (desc && !desc.value) desc.value = a.description || "";
+          let tags = [];
+          try { tags = JSON.parse(a.tags || "[]"); } catch { tags = []; }
+          row.querySelectorAll("[data-p-tag]").forEach((c) => { c.checked = tags.includes(c.value); });
+        });
+      }
     } else if (e.target.closest("[data-dup]")) {
       row.querySelector(".ops-menu").hidden = true;
       if (!(await uiConfirm("创建这份草稿的副本？", "创建副本"))) return;
@@ -394,8 +443,8 @@ export function wireDrafts() {
       try {
         const full = await api("GET", `/api/drafts/${id}`);
         const doc = deserialize(full.data?.draft?.layers_json || "");
-        const c = coverOf(composite(doc), doc.w, doc.h);
-        await api("PUT", `/api/drafts/${id}`, JSON.stringify({ cover: JSON.stringify({ w: c.w, h: c.h, data: c.data }) }));
+        const pixels = composite(doc);
+                await api("PUT", `/api/drafts/${id}`, JSON.stringify({ cover: JSON.stringify({ w: doc.w, h: doc.h, data: u8ToB64(pixels) }) }));
       } catch {
         /* 封面刷新失败不挡列表刷新 */
       }

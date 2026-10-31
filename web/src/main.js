@@ -1,14 +1,14 @@
 import "./style.css";
 import "./editor/editor.css";
 import "./pages/guide.css";
-import { api, getMe, logout, track } from "./api.js";
+import { api, getMe, track } from "./api.js";
 import { mountEditor } from "./editor/editor.js";
 import { composite, deserialize } from "./editor/doc.js";
 import { coverOf } from "./editor/paint.js";
 import { initCustomScroll } from "./scroll.js";
 import { initPixelSelects } from "./pixel-select.js";
 import { initPixelTips } from "./tooltip.js";
-import { uiAlert } from "./dialog.js";
+import { uiAlert, uiNotice } from "./dialog.js";
 import { loadGallery, mountHomeEdge, pageHome, wireGalleryInfinite, wireGalleryTabs, wireHomeEgg } from "./pages/home.js";
 import { pageAuth, wireAuthForm } from "./pages/auth.js";
 import { pageMe, pageUser, wireMePage } from "./pages/me.js";
@@ -17,9 +17,42 @@ import { wireDraftPreview } from "./pages/preview.js";
 import { mountArt } from "./pages/art.js";
 import { mountAdmin } from "./pages/admin.js";
 import { mountNotices, startBellPoll, updateBell } from "./pages/notices.js";
-import { pageGuide, wireGuide } from "./pages/guide.js";
+import { pageGuide, wireGuide, mountBoard } from "./pages/guide.js";
+import { wirePet as startPet } from "./pages/pet.js";
 
 const app = document.querySelector("#app");
+const BOARD_NOTICE_KEY = "pixel.board.notice";
+
+async function checkHomeBoard() {
+  try {
+    const r = await api("GET", "/api/board");
+    const board = r.status === 200 ? r.data?.board : null;
+    const version = board?.updated_at;
+    const content = String(board?.content || "").trim();
+    if (!version || !content || !["#", "", "#/"].includes(location.hash)) return;
+
+    let cached = {};
+    try {
+      cached = JSON.parse(localStorage.getItem(BOARD_NOTICE_KEY) || "{}");
+    } catch {
+      cached = {};
+    }
+    if (cached.seen === version || cached.dismissed === version) return;
+
+    const choice = await uiNotice(content);
+    if (!["#", "", "#/"].includes(location.hash)) return;
+    try {
+      const next = choice === false
+        ? { ...cached, dismissed: version }
+        : { ...cached, seen: version };
+      localStorage.setItem(BOARD_NOTICE_KEY, JSON.stringify(next));
+    } catch {
+      /* 存储被禁用时不影响公告显示 */
+    }
+  } catch {
+    /* 公告读取失败不影响主页 */
+  }
+}
 
 function nav(user) {
   return `
@@ -32,8 +65,7 @@ function nav(user) {
           user
             ? `<a href="#/me" class="px-btn">${user.nickname}</a>
                <a href="#/drafts" class="px-btn">草稿箱</a>
-               <a href="#/notices" class="px-btn" id="nav-bell">通知</a>
-               <button class="px-btn" id="nav-logout">退出</button>`
+               <a href="#/notices" class="px-btn" id="nav-bell">通知</a>`
             : `<a href="#/login" class="px-btn">登录</a>
                <a href="#/register" class="px-btn px-btn--cherry">注册</a>`
         }
@@ -43,7 +75,7 @@ function nav(user) {
 
 async function render() {
   // 切页时清理悬浮预览，避免从首页按 Z 进作品页后滞留
-  for (const id of ["draft-preview", "draft-hint", "gal-preview"]) {
+  for (const id of ["draft-preview", "draft-hint", "gal-preview", "nick-preview"]) {
     const el = document.getElementById(id);
     if (el) el.hidden = true;
   }
@@ -88,13 +120,17 @@ async function render() {
       api("GET", `/api/users/${data.user.id}/works`),
       api("GET", "/api/me/works"),
     ]);
+    const candidates = (mr.status === 200 ? mr.data.items : [])
+      .filter((w) => ["normal", "featured"].includes(w.status))
+      .map((w) => ({ id: w.id, kind: "artwork", title: w.title, png_url: w.png_url, status: w.status }));
     app.innerHTML =
       nav(user) +
       pageMe(
         user,
         data.stats,
         wr.status === 200 ? wr.data.items : [],
-        mr.status === 200 ? mr.data.items : []
+        candidates,
+        data.pet?.kind === "artwork" ? data.pet : null
       );
   } else if (hash.startsWith("#/draw")) {
     // 绘画软件式三栏全幅（去掉网页左右内边距）
@@ -211,12 +247,30 @@ async function render() {
     return;
   } else if (hash.startsWith("#/art/")) {
     const id = hash.split("/")[2];
-    app.innerHTML = nav(user) + `<main class="wrap"><div id="art-root"><p class="hint">读取中…</p></div></main>`;
+    app.innerHTML = nav(user) + `<main class="wrap wrap--art"><div id="art-root"><p class="hint">读取中…</p></div></main>`;
     wireNav();
     mountArt(id, user);
     return;
   } else if (hash.startsWith("#/user/")) {
-    const uid = Number(hash.split("/")[2]);
+    const seg = hash.split("/")[2];
+    if (seg === "latest") {
+      // 趣味跳转：最新注册的画友
+      app.innerHTML = nav(user) + `<main class="wrap"><div class="px-card">正在找最新加入的画友…</div></main>`;
+      wireNav();
+      (async () => {
+        try {
+          const r = await api("GET", "/api/users/latest");
+          if (r.status === 200 && r.data?.user?.id) {
+            if (user && r.data.user.id === user.id) location.hash = "#/me";
+            else location.hash = `#/user/${r.data.user.id}`;
+          } else location.hash = "#/";
+        } catch {
+          location.hash = "#/";
+        }
+      })();
+      return;
+    }
+    const uid = Number(seg);
     if (!uid) {
       app.innerHTML = nav(user) + `<main class="wrap"><div class="px-card">用户不存在。</div></main>`;
       wireNav();
@@ -238,9 +292,10 @@ async function render() {
         root.innerHTML = `<div class="px-card">用户不存在或已注销。</div>`;
         return;
       }
-      // 去掉外层 <main> 避免双层边距，与 /me 保持一致
-      const html = pageUser(ur.data.user, ur.data.stats, wr.status === 200 ? wr.data.items : []);
+      const html = pageUser(ur.data.user, ur.data.stats, wr.status === 200 ? wr.data.items : [], ur.data.pet?.kind === "artwork" ? ur.data.pet : null);
       root.innerHTML = html.replace(/^\s*<main[^>]*>/, "").replace(/<\/main>\s*$/, "");
+      wireDraftPreview();
+      wirePet();
     })();
     return;
   } else if (hash.startsWith("#/admin")) {
@@ -248,7 +303,7 @@ async function render() {
       location.hash = "#/login";
       return;
     }
-    app.innerHTML = nav(user) + `<main class="wrap"><h1 class="px-title">审核后台</h1><div id="admin-root" class="stack"><p class="hint">读取中…</p></div></main>`;
+    app.innerHTML = nav(user) + `<main class="wrap"><h1 class="px-title">审核后台</h1><div id="admin-root"><p class="hint">读取中…</p></div></main>`;
     wireNav();
     mountAdmin();
     return;
@@ -266,6 +321,7 @@ async function render() {
     app.innerHTML = nav(user) + pageGuide(gid);
     wireNav();
     wireGuide();
+    mountBoard(user);
     return;
   } else if (hash === "#/" || hash === "" || hash === "#") {
     app.innerHTML = nav(user) + pageHome(user);
@@ -289,17 +345,13 @@ async function render() {
   wireGalleryInfinite();
   loadGallery(false);
   wireDraftPreview();
-  if (hash === "#/" || hash === "" || hash === "#") mountHomeEdge();
+  if (hash === "#/" || hash === "" || hash === "#") {
+    mountHomeEdge();
+    checkHomeBoard();
+  }
   if (document.querySelector("[data-home-egg]")) wireHomeEgg();
 
   function wireNav() {
-  const logoutBtn = document.querySelector("#nav-logout");
-  if (logoutBtn)
-    logoutBtn.onclick = async () => {
-      await logout();
-      location.hash = "#/";
-      render();
-    };
   updateBell();
   startBellPoll();
 }
@@ -307,7 +359,12 @@ async function render() {
   wireAuthForm(hash);
 
   wireMePage(render);
+  wirePet();
 
+}
+
+function wirePet() {
+  startPet(document.querySelector("#pet-run"));
 }
 
 window.addEventListener("hashchange", render);

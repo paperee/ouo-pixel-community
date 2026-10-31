@@ -7,28 +7,28 @@ export function pageAuth(mode) {
     <main class="wrap narrow">
       <div class="px-card auth-hero">
         <div class="auth-pixels" aria-hidden="true"><i style="background:var(--accent)"></i><i style="background:var(--sky)"></i><i style="background:#2eb5a8"></i><i style="background:#f5a623"></i></div>
-        <h1 class="px-title">${isLogin ? "欢迎回来" : "加入OuO像素画社区"}</h1>
-        <p class="hint">${isLogin ? "登录后接着画，草稿和作品都在等你。" : "打开就能画，画完就能发。不用下载，不用学。"}</p>
+        <h1 class="px-title">${isLogin ? "欢迎回家" : "加入OuO社区"}</h1>
+        <p class="hint">${isLogin ? "嘿，来瞧瞧是谁上课（上班）还想过来摸鱼？" : "登录后即可享用云端草稿和作品发布（笑死没有更多了…）"}</p>
         <div class="row">
-          <span class="px-badge">站内画布</span>
+          <span class="px-badge">简易画布</span>
           <span class="px-badge">云端草稿</span>
-          <span class="px-badge">作品画廊</span>
+          <span class="px-badge">作品社区</span>
         </div>
       </div>
       <form id="auth-form" class="px-card stack">
         ${
           isLogin
             ? ""
-            : `<input class="px-input" name="nickname" maxlength="20" placeholder="昵称（可不填）" />`
+            : `<input class="px-input" name="nickname" maxlength="20" placeholder="昵称（会有人不填吗）" />`
         }
-        <input class="px-input" name="email" type="email" required placeholder="邮箱" />
+        <input class="px-input" name="email" type="email" required placeholder="邮箱（不许不填）" />
         <input class="px-input" name="password" type="password" required minlength="6" placeholder="密码（至少 6 位）" />
         <button class="px-btn px-btn--cherry" type="submit">${isLogin ? "登录" : "注册"}</button>
         <p class="err" id="auth-err"></p>
         <p class="hint">${
           isLogin
-            ? `没账号？<a href="#/register">去注册</a>`
-            : `有账号了？<a href="#/login">去登录</a>`
+            ? `没账号？<a href="#/register">快点去注册</a>`
+            : `有账号了？<a href="#/login">快点去登录</a>`
         }</p>
       </form>
     </main>`;

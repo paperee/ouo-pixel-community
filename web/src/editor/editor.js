@@ -41,6 +41,9 @@ import { api, track } from "../api.js";
 import { hideTracksFor } from "../scroll.js";
 import { uiAlert, uiChoice, uiConfirm, uiPrompt } from "../dialog.js";
 
+// 触屏无 Z 键：长按 500ms 等效按住 Z（图层/版本预览共用）
+const TOUCH_UI = typeof window !== "undefined" && !!window.matchMedia?.("(pointer: coarse)").matches;
+
 // 预设色盘（来源 lospec.com，OuO像素画社区色盘库；各 6~8 色）
 const PALETTE_PACKS = [
   { name: "经典8", en: "Endesga 8", by: "Endesga", colors: ["#fdfdf8", "#d32734", "#da7d22", "#e6da29", "#28c641", "#2d93dd", "#7b53ad", "#1b1c33"] },
@@ -136,7 +139,7 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
           <div class="px-card stack">
             <div class="row" style="justify-content:space-between;align-items:center">
               <b>调色板</b>
-              <span class="swatch" data-cur-swatch title="当前颜色"></span>
+              <span class="swatch swatch--cur" data-cur-swatch title="当前颜色"></span>
             </div>
             <div class="wheel-wrap">
               <canvas data-wheel width="180" height="180" title="点击取色"></canvas>
@@ -325,13 +328,14 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
       `<button class="tool-btn" data-new-canvas title="新建画布">新建</button>
        <button class="tool-btn" data-save title="保存草稿(Ctrl+S)">保存</button>
        <div class="tool-sep"></div>
+       <a href="#/drafts" class="tool-btn" title="打开草稿箱">草稿箱</a>
+       <span class="hint" data-cloud-status></span>`) +
+    `<div class="tool-sep"></div>` +
+  statusGroup("存档", `
        <button class="tool-btn" data-export title="导出 PNG 图片">导出</button>
        <select data-scale title="导出倍率"><option value="1">1x</option><option value="2">2x</option><option value="4" selected>4x</option><option value="8">8x</option></select>
        <button class="tool-btn" data-dump title="源文件导出">源导出</button>
-       <label class="tool-btn" title="载入源文件（.json）">源载入<input type="file" data-load accept="application/json,.json" hidden></label>
-       <div class="tool-sep"></div>
-       <a href="#/drafts" class="tool-btn" title="打开草稿箱">草稿箱</a>
-       <span class="hint" data-cloud-status></span>`) +
+       <label class="tool-btn" title="载入源文件（.json）">源载入<input type="file" data-load accept="application/json,.json" hidden></label>`) +
     `<div class="tool-sep"></div>` +
     statusGroup("查看",
       iconBtn("data-zoom=\"-\"", "minus", "缩小(-)") +
@@ -822,7 +826,7 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
       if (!hint || !pv) return;
       pv.hidden = true;
       hint.hidden = false;
-      hint.textContent = "按住 Z 显示大图";
+      hint.textContent = TOUCH_UI ? "长按显示大图" : "按住 Z 显示大图";
       const w = hint.offsetWidth || 160,
         h = hint.offsetHeight || 32;
       let lx = x + 16,
@@ -906,6 +910,66 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
         hoverLi = -1;
         hide();
       }
+    });
+    // 长按等效按住 Z（触屏）：松手隐藏，长按后松手不选中图层
+    let lzTimer = null;
+    let lzFired = false;
+    let lzX = 0;
+    let lzY = 0;
+    box.addEventListener("touchstart", (e) => {
+      if (S.layerDrag || e.touches.length !== 1) return;
+      const r = thumbOf(e.target);
+      if (!r) return;
+      const t = e.touches[0];
+      lzFired = false;
+      lzX = t.clientX;
+      lzY = t.clientY;
+      if (lzTimer) clearTimeout(lzTimer);
+      lzTimer = setTimeout(() => {
+        lzTimer = null;
+        lzFired = true;
+        hoverLi = Number(r.dataset.li);
+        lastX = lzX;
+        lastY = lzY;
+        zDown = true;
+        window.__pxEdZ = true;
+        const tip = document.querySelector(".px-tip");
+        if (tip) tip.hidden = true;
+        update();
+      }, 500);
+    }, { passive: true });
+    box.addEventListener("touchmove", (e) => {
+      if (!lzTimer || !e.touches.length) return;
+      const t = e.touches[0];
+      if (Math.hypot(t.clientX - lzX, t.clientY - lzY) > 12) {
+        clearTimeout(lzTimer);
+        lzTimer = null;
+      }
+    }, { passive: true });
+    box.addEventListener("touchend", (e) => {
+      if (lzTimer) {
+        clearTimeout(lzTimer);
+        lzTimer = null;
+      }
+      if (lzFired) {
+        lzFired = false;
+        e.preventDefault();
+      }
+      zDown = false;
+      window.__pxEdZ = false;
+      hoverLi = -1;
+      hide();
+    }, { passive: false });
+    box.addEventListener("touchcancel", () => {
+      if (lzTimer) {
+        clearTimeout(lzTimer);
+        lzTimer = null;
+      }
+      lzFired = false;
+      zDown = false;
+      window.__pxEdZ = false;
+      hoverLi = -1;
+      hide();
     });
     const typing = () => {
       const t = document.activeElement;
@@ -2309,7 +2373,7 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
       if (!hint || !pv) return;
       pv.hidden = true;
       hint.hidden = false;
-      hint.textContent = '按住 Z 显示大图，按 D 删除版本';
+      hint.textContent = TOUCH_UI ? '长按显示大图' : '按住 Z 显示大图，按 D 删除版本';
       const w = hint.offsetWidth || 160; const h = hint.offsetHeight || 32;
       let lx = x + 16; let ly = y + 18;
       if (lx + w > window.innerWidth - 8) lx = x - w - 12;
@@ -2368,6 +2432,66 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
         hoverVid = o.dataset.v;
         update();
       } else if (hoverVid != null) { hoverVid = null; hide(); }
+    });
+    // 长按等效按住 Z（触屏）：版本选项长按出大图，松手隐藏
+    let vzTimer = null;
+    let vzFired = false;
+    let vzX = 0;
+    let vzY = 0;
+    document.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 1) return;
+      const o = optInOurList(e.target);
+      if (!o) return;
+      const t = e.touches[0];
+      vzFired = false;
+      vzX = t.clientX;
+      vzY = t.clientY;
+      if (vzTimer) clearTimeout(vzTimer);
+      vzTimer = setTimeout(() => {
+        vzTimer = null;
+        vzFired = true;
+        lastX = vzX;
+        lastY = vzY;
+        hoverVid = o.dataset.v;
+        zDown = true;
+        window.__pxEdZ = true;
+        const tip = document.querySelector('.px-tip');
+        if (tip) tip.hidden = true;
+        update();
+      }, 500);
+    }, { passive: true });
+    document.addEventListener('touchmove', (e) => {
+      if (!vzTimer || !e.touches.length) return;
+      const t = e.touches[0];
+      if (Math.hypot(t.clientX - vzX, t.clientY - vzY) > 12) {
+        clearTimeout(vzTimer);
+        vzTimer = null;
+      }
+    }, { passive: true });
+    document.addEventListener('touchend', (e) => {
+      if (vzTimer) {
+        clearTimeout(vzTimer);
+        vzTimer = null;
+      }
+      if (vzFired) {
+        vzFired = false;
+        e.preventDefault();
+      }
+      zDown = false;
+      window.__pxEdZ = false;
+      hoverVid = null;
+      hide();
+    }, { passive: false });
+    document.addEventListener('touchcancel', () => {
+      if (vzTimer) {
+        clearTimeout(vzTimer);
+        vzTimer = null;
+      }
+      vzFired = false;
+      zDown = false;
+      window.__pxEdZ = false;
+      hoverVid = null;
+      hide();
     });
     edVersSel.addEventListener('change', () => { if (hoverVid != null && zDown) update(); });
     // 绘画页没有草稿箱的全局 Z 状态，这里自己管 zDown（编辑器本身只占用 ctrl+Z，单按 Z 无冲突）
@@ -2458,6 +2582,8 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
     cloudId: () => S.cloudId,
     panning: () => !!S.panning,
     zoom: () => S.zoom,
+    undo,
+    redo,
     fg: () => S.fg,
   };
 }

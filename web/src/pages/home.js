@@ -1,8 +1,12 @@
 // 社区主页 + 画廊（最新/热门/精选 + 无限滚动）
 import { api } from "../api.js";
-import { HOME_TIPS, esc } from "./shared.js";
+import { HOME_TIPS, esc, nIcon } from "./shared.js";
+
+// 当前访客是否登录：登录才在卡片上渲染点赞小按钮（与详情页一致，游客不渲染）
+let galleryViewer = false;
 
 export function pageHome(user) {
+  galleryViewer = !!user;
   const cta = user
     ? `<div class="row">
           <a href="#/draw" class="px-btn px-btn--cherry">打开画布作画</a>
@@ -44,14 +48,17 @@ export function pageHome(user) {
     </main>`;
 }
 
-export function artCard(a) {
+export function artCard(a, viewer = false) {
   return `
     <div class="art-card px-card" data-art="${a.id}">
       <a href="#/art/${a.id}" style="display:contents">
         <img src="${a.png_url}" alt="${esc(a.title)}" loading="lazy" data-gal="${a.id}"${Number(a.width) > 0 && Number(a.height) > 0 ? ` width="${Number(a.width)}" height="${Number(a.height)}"` : ""}>
       </a>
       <b><a href="#/art/${a.id}" class="ellipsis-1" style="color:inherit;text-decoration:none" title="${esc(a.title)}">${esc(a.title)}</a></b>
-      <span class="hint" style="display:block">浏览 ${a.views} · 点赞 ${a.likes_count} · 评论 ${a.comments_count}</span>
+      <span class="art-meta">
+        <span class="hint">${viewer ? `浏览 ${a.views} · 评论 ${a.comments_count}` : `浏览 ${a.views} · 点赞 ${a.likes_count} · 评论 ${a.comments_count}`}</span>
+        ${viewer ? `<button class="like-mini${a.liked ? " on" : ""}" data-like="${a.id}" title="${a.liked ? "取消点赞" : "点赞"}">${nIcon("thumb")}<b data-like-n>${a.likes_count}</b></button>` : ""}
+      </span>
     </div>`;
 }
 
@@ -268,12 +275,42 @@ export async function loadGallery(more = false) {
       delete box.dataset.masonryNext;
       delete box.dataset.masonryCols;
     }
-    appendArtCards(box, r.data.items.map(artCard).join(""));
+    appendArtCards(box, r.data.items.map((a) => artCard(a, galleryViewer)).join(""));
   }
   galleryPage++;
   galleryHasMore = !!r.data.has_more;
   const end = document.querySelector("#gallery-end");
   if (end) end.hidden = galleryHasMore;
+}
+
+// 卡片点赞小按钮：事件委托挂 document，瀑布流重建/无限滚动追加都不用重绑
+export function wireGalleryLikes() {
+  if (window.__pxGalLike) return;
+  window.__pxGalLike = true;
+  document.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-like]");
+    if (!b || b._busy) return;
+    e.preventDefault();
+    b._busy = true;
+    const on = b.classList.contains("on");
+    const r = await api(on ? "DELETE" : "POST", `/api/artworks/${b.dataset.like}/like`);
+    b._busy = false;
+    if (r.status === 401) {
+      location.hash = "#/login";
+      return;
+    }
+    if (r.status !== 200 && r.status !== 201) return;
+    b.classList.toggle("on", r.data.liked);
+    b.title = r.data.liked ? "取消点赞" : "点赞";
+    const n = b.querySelector("[data-like-n]");
+    if (n) n.textContent = r.data.likes_count;
+    // 点赞成功弹一下（复用详情页的摇动动画，连点可重复触发）
+    b.classList.remove("liked-pop");
+    if (r.data.liked) {
+      void b.offsetWidth;
+      b.classList.add("liked-pop");
+    }
+  });
 }
 
 // 滚到底自动加载下一页（一页 24 张，宽屏瀑布流大约多铺几行），代替“更多”按钮

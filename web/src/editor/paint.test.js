@@ -7,6 +7,7 @@ import {
   createDoc,
   deleteLayer,
   deserialize,
+  duplicateLayer,
   getPixel,
   mergeDown,
   mergeVisible,
@@ -241,6 +242,58 @@ assert.equal(rgbToHex(255, 77, 109), "#ff4d6d");
   d.layers[1].blend = "multiply";
   const m3 = composite(d);
   assert.deepEqual([m3[i], m3[i + 1], m3[i + 2], m3[i + 3]], [0, 0, 0, 255]);
+}
+
+// 阿尔法锁定：只许改色，不许动 alpha
+{
+  const d = createDoc(4, 4);
+  d.layers[0].alphaLock = true;
+  // 透明区画不上（画笔/直线/油漆桶都走这两个入口）
+  assert.equal(overPixel(d, 0, 1, 1, [255, 0, 0, 255]), false);
+  assert.equal(setPixel(d, 0, 2, 2, [255, 0, 0, 255]), false);
+  assert.deepEqual(getPixel(d, 0, 1, 1), [0, 0, 0, 0]);
+  // 已有像素可以改色，alpha 不动
+  d.layers[0].alphaLock = false;
+  setPixel(d, 0, 1, 1, [255, 0, 0, 255]);
+  overPixel(d, 0, 1, 2, [0, 0, 255, 128]); // 半透明底
+  d.layers[0].alphaLock = true;
+  assert.equal(setPixel(d, 0, 1, 1, [0, 255, 0, 255]), true);
+  assert.deepEqual(getPixel(d, 0, 1, 1), [0, 255, 0, 255]);
+  overPixel(d, 0, 1, 2, [255, 255, 255, 255], 0.5);
+  const [pr, pg, pb, pa] = getPixel(d, 0, 1, 2);
+  assert.ok(pr > 0 && pg > 0 && pb > 0, "锁定时画笔只混色"); // 蓝底混白
+  assert.equal(pa, 128, "锁定时 alpha 不动");
+  // 橡皮（透明色叠加）和 setPixel 擦除都无效
+  assert.equal(overPixel(d, 0, 1, 1, [0, 0, 0, 0]), false);
+  assert.equal(setPixel(d, 0, 1, 1, [0, 0, 0, 0]), false);
+  assert.deepEqual(getPixel(d, 0, 1, 1), [0, 255, 0, 255]);
+  // 锁定状态随序列化/快照往返
+  const d2 = deserialize(serialize(d));
+  assert.equal(d2.layers[0].alphaLock, true);
+  const d3 = createDoc(4, 4);
+  restore(d3, snapshot(d));
+  assert.equal(d3.layers[0].alphaLock, true);
+}
+
+// 复制图层：像素/属性全带走，副本插在原层上方并选中
+{
+  const d = createDoc(4, 4);
+  setPixel(d, 0, 1, 1, [255, 0, 0, 255]);
+  d.layers[0].opacity = 0.6;
+  d.layers[0].blend = "multiply";
+  d.layers[0].alphaLock = true;
+  const ni = duplicateLayer(d, 0);
+  assert.equal(ni, 1);
+  assert.equal(d.layers.length, 2);
+  assert.equal(d.active, 1);
+  assert.equal(d.layers[1].name, "图层 1 副本");
+  assert.equal(d.layers[1].opacity, 0.6);
+  assert.equal(d.layers[1].blend, "multiply");
+  assert.equal(d.layers[1].alphaLock, true);
+  assert.deepEqual(getPixel(d, 1, 1, 1), [255, 0, 0, 255]);
+  // 副本是独立拷贝：改副本不影响原层
+  setPixel(d, 1, 1, 1, [0, 0, 255, 255]);
+  assert.deepEqual(getPixel(d, 0, 1, 1), [255, 0, 0, 255]);
 }
 
 console.log("PAINT_TEST_OK");

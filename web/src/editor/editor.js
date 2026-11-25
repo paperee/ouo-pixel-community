@@ -7,9 +7,11 @@ import {
   createDoc,
   deleteLayer,
   deserialize,
+  duplicateLayer,
   getPixel,
   insertLayerAbove,
   MAX_LAYERS,
+  MAX_MANUAL_VERSIONS,
   mergeDown,
   mergeVisible,
   moveLayer,
@@ -43,6 +45,7 @@ import { uiAlert, uiChoice, uiConfirm, uiPrompt } from "../dialog.js";
 
 // 触屏无 Z 键：长按 500ms 等效按住 Z（图层/版本预览共用）
 const TOUCH_UI = typeof window !== "undefined" && !!window.matchMedia?.("(pointer: coarse)").matches;
+const hasOpenDialog = () => !!document.querySelector("[data-dlg]:not([hidden]), [data-modal]:not([hidden])");
 
 // 预设色盘（来源 lospec.com，OuO像素画社区色盘库；各 6~8 色）
 const PALETTE_PACKS = [
@@ -55,8 +58,10 @@ const PALETTE_PACKS = [
 ];
 const PACK_KEY = "pixel.pack";
 const PERSONAL_KEY = "pixel.palette";
+const RECENT_KEY = "pixel.colorhist"; // 历史颜色：最近实际用过的颜色，新→旧
 const PREFS_KEY = "pixel.prefs"; // 工具/笔刷/视图偏好（10 秒一存 + 关页面存）
 const NEWSIZE_KEY = "pixel.newsize"; // 新建弹窗上次尺寸
+const VERSFULL_KEY = "pixel.versfull"; // 存档满 15 个的自动处理：clean=清最老 copy=建副本；无值=每次询问（草稿箱可恢复询问）
 const ERASER = [0, 0, 0, 0];
 
 function loadPrefs() {
@@ -75,7 +80,7 @@ function loadPrefs() {
     if (typeof o.showGrid === "boolean") out.showGrid = o.showGrid;
     if (typeof o.showMore === "boolean") out.showMore = o.showMore;
     if (typeof o.fg === "string" && /^#[0-9a-f]{6}$/i.test(o.fg)) out.fg = o.fg.toLowerCase();
-    if (typeof o.bg === "string" && /^#[0-9a-f]{6}$/i.test(o.bg)) out.bg = o.bg.toLowerCase();
+    if (["hsv", "rgb"].includes(o.cmode)) out.cmode = o.cmode;
     return out;
   } catch {
     return {};
@@ -93,8 +98,8 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
     size: 1,
     circle: false,
     bop: 100, // 笔刷不透明度 %
-    fg: "#2b2b2b",
-    bg: "#ffffff",
+    fg: "#ff4d6d", // 默认色 V=100：调色板打开就是全明度
+    cmode: "hsv", // 调色板滑块模式：hsv / rgb
     fillMode: "hollow",
     tol: 32,
     zoom: 10,
@@ -116,6 +121,7 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
     shapeStart: null,
     sel: null, // 轮廓式选区 {x0,y0,x1,y1, li, floating:null|{w,h,data,ox,oy,fx,fy,origin}}：圈选只记虚线框不动像素，拖动才提起
     personal: loadPersonal(),
+    hist: loadRecent(),
   };
   // 上次成功落盘的画布原文：内容没变时手动保存也不触发备份位门禁
   let lastSavedDoc = initial ? serialize(initial) : null;
@@ -145,9 +151,23 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
               <canvas data-wheel width="180" height="180" title="点击取色"></canvas>
               <div class="wheel-marker" data-marker hidden></div>
             </div>
+            <div class="row cmode-row">
+              <button class="tool-btn active" data-cmode="hsv" title="色相/饱和/明度滑块">HSV</button>
+              <button class="tool-btn" data-cmode="rgb" title="红/绿/蓝滑块">RGB</button>
+            </div>
+            <div class="stack hsv-sliders" data-hsvbox>
+              <label class="tool-lab">色相 <input type="range" data-hue min="0" max="359" step="1" value="0" title="色相 H"><b data-huev>0</b></label>
+              <label class="tool-lab">饱和 <input type="range" data-sat min="0" max="100" step="1" value="0" title="饱和度 S"><b data-satv>0</b></label>
+              <label class="tool-lab">明度 <input type="range" data-val min="0" max="100" step="1" value="100" title="明度 V"><b data-valv>100</b></label>
+            </div>
+            <div class="stack hsv-sliders" data-rgbbox hidden>
+              <label class="tool-lab">红 <input type="range" data-r min="0" max="255" step="1" value="255" title="红 R"><b data-rv>255</b></label>
+              <label class="tool-lab">绿 <input type="range" data-g min="0" max="255" step="1" value="77" title="绿 G"><b data-gv>77</b></label>
+              <label class="tool-lab">蓝 <input type="range" data-b min="0" max="255" step="1" value="109" title="蓝 B"><b data-bv>109</b></label>
+            </div>
             <div class="row hex-row">
-              <label class="tool-lab">明度 <input type="range" data-val min="5" max="100" value="100" title="调整当前颜色明度"></label>
-              <input class="underline-input" data-hex maxlength="7" value="#2b2b2b" spellcheck="false" title="输入 hex 颜色，回车应用">
+              <span class="hint">HEX</span>
+              <input class="underline-input" data-hex maxlength="7" value="#ff4d6d" spellcheck="false" title="输入 hex 颜色，回车应用">
             </div>
             <label class="tool-lab">预设色盘
               <select data-packsel class="pack-sel" title="预设色盘"></select>
@@ -156,6 +176,10 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
             <div class="swatches" data-self></div>
             <div class="ed-palette-row">
               <button class="tool-btn" data-pal-add title="把当前色存入个人色盘">＋存当前色</button>
+            </div>
+            <div class="hist-wrap" data-histrow hidden>
+              <span class="hint">历史颜色</span>
+              <div class="swatches" data-hist></div>
             </div>
           </div>
           <div class="px-card stack">
@@ -217,6 +241,13 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
     </div>`;
 
   const $ = (s) => root.querySelector(s);
+  // 全局（document/window）监听统一走 on()：unmount 时一并摘除，
+  // SPA 反复进出画板不再累积幽灵监听器（旧实例的 Ctrl+Z/空格处理器曾一直活着）
+  const cleanups = [];
+  const on = (target, type, fn, opts) => {
+    target.addEventListener(type, fn, opts);
+    cleanups.push(() => target.removeEventListener(type, fn, opts));
+  };
   const view = $('[data-cv="view"]');
   const over = $('[data-cv="over"]');
   const mini = $('[data-cv="mini"]');
@@ -257,6 +288,8 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
     mergeVis: '<rect x="2" y="5.5" width="8" height="8" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-width="2" d="M6 5.5V4a1 1 0 011-1h5a1 1 0 011 1v5a1 1 0 01-1 1h-1.5"/>',
     trash: '<path fill="none" stroke="currentColor" stroke-width="2" d="M2.5 4h11M6 4V2.5h4V4M4.5 4l.7 10h5.6l.7-10M6.8 7v4M9.2 7v4"/>',
     eye: '<path fill="none" stroke="currentColor" stroke-width="2" d="M1.5 8S4 3.8 8 3.8 12 8 14.5 8 12 12.2 8 12.2 4 8 1.5 8z"/><circle cx="8" cy="8" r="2" fill="currentColor"/>',
+    lock: '<rect x="3.5" y="7" width="9" height="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-width="2" d="M5.5 7V5.2a2.5 2.5 0 015 0V7"/>',
+    lockOpen: '<rect x="3.5" y="7" width="9" height="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-width="2" d="M5.5 7V5.2a2.5 2.5 0 015 0v-1"/>',
     eyeOff: '<path fill="none" stroke="currentColor" stroke-width="2" d="M3 3l10 10M6.6 4.2A7.6 7.6 0 018 4c4 0 6.5 4 6.5 4a13 13 0 01-2.4 2.5M9.9 9.9a2 2 0 01-2.8-2.8M4 6.5C3 7.3 1.5 8 1.5 8S4 12.2 8 12.2c.9 0 1.7-.2 2.5-.6"/>',
     copy: '<rect x="5.5" y="5.5" width="8" height="8" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-width="2" d="M10.5 5.5v-2a1 1 0 00-1-1h-6a1 1 0 00-1 1v6a1 1 0 001 1h2"/>',
     cut: '<circle cx="4.5" cy="4.5" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="4.5" cy="11.5" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M6.3 6.1L14 13M6.3 9.9L14 3" fill="none" stroke="currentColor" stroke-width="1.8"/>',
@@ -278,10 +311,12 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
     list.map(([k, label, icon]) => iconBtn(`data-tool="${k}"`, icon || k, label)).join("");
   $("[data-layerbtns]").innerHTML =
     iconBtn("data-l-add", "plus", "在当前层上方新建图层") +
+    iconBtn("data-l-dup", "copy", "复制当前层") +
     iconBtn("data-l-up", "up", "上移") +
     iconBtn("data-l-down", "down", "下移") +
     iconBtn("data-l-merge", "mergeDown", "与下方图层合并") +
     iconBtn("data-l-mergevis", "mergeVis", "合并所有可见层") +
+    iconBtn("data-l-clear", "clearBox", "清空当前层的像素（保留图层）") +
     iconBtn("data-l-del", "trash", "删除当前层");
   const group = (cap, inner, cls = "") =>
     `<div class="ribbon-group ${cls}"><div class="ribbon-row">${inner}</div><span class="ribbon-cap">${cap}</span></div>`;
@@ -341,6 +376,7 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
       iconBtn("data-zoom=\"-\"", "minus", "缩小(-)") +
       iconBtn("data-zoom=\"+\"", "plus", "放大(+)") +
       iconBtn("data-fit", "fit", "适应窗口") +
+      `<button class="tool-btn" data-keys title="快捷键一览">?</button>` +
       `<b data-zoomlab></b><span class="tool-lab">画布<b data-cur-size></b></span>`) +
     statusGroup("面板",
       `<button class="tool-btn drawer-btn-rail" data-drawer-btn="rail" title="打开/关闭左侧工具栏">工具</button>` +
@@ -397,10 +433,10 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
     pokeScroll();
   };
   drawerBg?.addEventListener("click", closeDrawers);
-  document.addEventListener("keydown", (e) => {
+  on(document, "keydown", (e) => {
     if (e.key === "Escape" && drawerBg && !drawerBg.hidden) closeDrawers();
   });
-  window.addEventListener("resize", () => {
+  on(window, "resize", () => {
     // 回到桌面宽度时正在开的抽屉自动收回，避免遮罩残留
     if (!mqSide.matches) shutDrawer(sideEl);
     if (!mqRail.matches) shutDrawer(railEl);
@@ -450,6 +486,19 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
       S.showGrid = !S.showGrid;
       render(); // 纯视图开关，立即重绘（之前要等下一次落笔才刷新）
     }
+    else if (b.hasAttribute("data-keys")) {
+      uiAlert([
+        "工具：B 铅笔 · E 橡皮 · G 油漆桶 · I 取色",
+        "　　　V 选区 · L 直线 · R 矩形 · O 椭圆 · F 空心/实心 · C 圆头/方头",
+        "笔刷：[ / ] 调整大小",
+        "视图：+ / - 缩放 · Ctrl+滚轮精细缩放 · 空格+拖拽平移",
+        "编辑：Ctrl+Z 撤销 · Ctrl+Y / Ctrl+Shift+Z 重做 · Ctrl+S 保存",
+        "图层：Ctrl+拖拽移动当前层",
+        "选区：Enter 提交 · Esc 取消 · Delete 删除",
+        "预览：图层/版本上按住 Z 查看大图 · 版本上按 D 删除",
+        "取色：右键按住拖动可连续取色",
+      ].join("\n"));
+    }
     else if (b.hasAttribute("data-undo")) undo();
     else if (b.hasAttribute("data-redo")) redo();
     else if (b.hasAttribute("data-more")) {
@@ -460,8 +509,9 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
     else if (b.hasAttribute("data-sel-cut")) cutSelToLayer();
     else if (b.hasAttribute("data-sel-del")) delSel();
     else if (b.hasAttribute("data-clear")) {
-      uiConfirm("清空整个画布及所有图层？可撤销。").then((ok) => {
+      uiConfirm("清空整个画布？所有图层都会被清掉，只保留当前层（可撤销）。").then((ok) => {
         if (!ok) return;
+        S.sel = null; // 浮动/框选随画布一起清，否则提交的浮动像素会在空画布上“复活”
         pushHistory();
         const keep = S.doc.layers[S.doc.active] ?? S.doc.layers[0];
         keep.pixels.fill(0);
@@ -512,7 +562,7 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
     $("[data-self]").innerHTML = S.personal
       .map((c, i) => `<button class="swatch" data-p="${i}" style="background:${c}" title="${c}（点击取色，双击删除）"></button>`)
       .join("");
-    [...$("[data-packgrid]").children, ...$("[data-self]").children].forEach((b) =>
+    [...$("[data-packgrid]").children, ...$("[data-self]").children, ...$("[data-hist]").children].forEach((b) =>
       b.classList.toggle("active", (b.dataset.c || S.personal[b.dataset.p]) === S.fg)
     );
     // 右上小色块：所有取色通道都走 renderPalette，在这里统一同步当前色
@@ -531,8 +581,6 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
     S.fg = c;
     const [pr, pg, pb] = hexToRgba(c);
     [S.wh, S.ws] = rgbToHsv(pr, pg, pb); // 色相饱和锚点：明度滑动不再累积量化漂移
-    const fgi = $('[data-fg]');
-    if (fgi) fgi.value = c; // 颜色模块已移除时只有调色板同步
     renderPalette();
     syncWheelUI();
   };
@@ -559,6 +607,31 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
       localStorage.setItem(PERSONAL_KEY, JSON.stringify(S.personal));
       renderPalette();
     }
+  };
+
+  // ---- 历史颜色：只在颜色真正被用上时记录（落笔/油漆桶/形状/画布取色），拖滑块不记 ----
+  const HIST_MAX = 16; // 8 列 x 2 行
+  const renderRecent = () => {
+    $("[data-histrow]").hidden = !S.hist.length;
+    const box = $("[data-hist]");
+    box.innerHTML = S.hist
+      .map((c) => `<button class="swatch" data-c="${c}" style="background:${c}" title="${c}"></button>`)
+      .join("");
+    [...box.children].forEach((b) => b.classList.toggle("active", b.dataset.c === S.fg));
+  };
+  const noteRecentColor = (c) => {
+    if (S.hist[0] === c) return; // 和上一次相同不重复记
+    S.hist = [c, ...S.hist.filter((x) => x !== c)].slice(0, HIST_MAX);
+    try {
+      localStorage.setItem(RECENT_KEY, JSON.stringify(S.hist));
+    } catch {
+      /* 记不住就下次再说 */
+    }
+    renderRecent();
+  };
+  $("[data-hist]").onclick = (e) => {
+    const b = e.target.closest("[data-c]");
+    if (b) pickColor(b.dataset.c);
   };
 
   // ---- 色轮（H+S 盘 + 明度条 + hex 直输） ----
@@ -598,9 +671,32 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
     const s = S.ws ?? s0;
     if (Math.abs(v - S.wheelV) > 0.004) {
       S.wheelV = v;
-      $('[data-val]').value = Math.round(v * 100);
+      if (document.activeElement !== $('[data-val]')) $('[data-val]').value = Math.round(v * 100);
       drawWheel(); // 轮面亮度跟随当前色（色轮拖动时 v 不变，不会触发）
     }
+    // HSV 滑块同步：正在拖的那根不写回，避免和手指打架；饱和/明度轨道色带跟随当前色相
+    const hueSl = $('[data-hue]');
+    const satSl = $('[data-sat]');
+    if (document.activeElement !== hueSl) hueSl.value = Math.round(h * 360);
+    if (document.activeElement !== satSl) satSl.value = Math.round(s * 100);
+    // 数值读数始终刷新（正在拖的那根也要看到自己的数）
+    $('[data-huev]').textContent = Math.round(h * 360);
+    $('[data-satv]').textContent = Math.round(s * 100);
+    $('[data-valv]').textContent = Math.round(S.wheelV * 100);
+    // RGB 滑块同步：读数照刷，滑块位置跳过正在拖的那根；轨道色带固定另外两通道
+    const rgbSls = [$('[data-r]'), $('[data-g]'), $('[data-b]')];
+    const rgbVs = [r, g, b];
+    const rgbTvs = [$('[data-rv]'), $('[data-gv]'), $('[data-bv]')];
+    rgbSls.forEach((sl, i) => {
+      if (document.activeElement !== sl) sl.value = rgbVs[i];
+      rgbTvs[i].textContent = rgbVs[i];
+    });
+    rgbSls[0].style.background = `linear-gradient(90deg, rgb(0 ${g} ${b}), rgb(255 ${g} ${b}))`;
+    rgbSls[1].style.background = `linear-gradient(90deg, rgb(${r} 0 ${b}), rgb(${r} 255 ${b}))`;
+    rgbSls[2].style.background = `linear-gradient(90deg, rgb(${r} ${g} 0), rgb(${r} ${g} 255))`;
+    const hd = Math.round(h * 360);
+    satSl.style.background = `linear-gradient(90deg, hsl(${hd} 0% 50%), hsl(${hd} 100% 50%))`;
+    $('[data-val]').style.background = `linear-gradient(90deg, #000, hsl(${hd} ${Math.round(s * 100)}% 50%))`;
     const R = WHEEL / 2;
     const rad = (h * 360 * Math.PI) / 180;
     wheelMarker.hidden = false;
@@ -628,24 +724,64 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
     if (wheelDown) pickFromWheel(e);
   });
   wheelCv.addEventListener("pointerup", () => (wheelDown = false));
-  $("[data-val]").oninput = (e) => {
-    // 明度滑块实时改变当前色（锚点色相饱和不变），hex/轮面跟随
-    const nv = Number(e.target.value) / 100;
-    let h = S.wh;
-    let s = S.ws;
-    if (h === undefined || s === undefined) {
+  // HSV 三滑块共用：锚点（色相/饱和）+ 明度 → 当前色，hex/轮面/色盘全部跟随
+  const ensureAnchors = () => {
+    if (S.wh === undefined || S.ws === undefined) {
       const [r0, g0, b0] = hexToRgba(S.fg);
-      [h, s] = rgbToHsv(r0, g0, b0);
-      S.wh = h;
-      S.ws = s;
+      [S.wh, S.ws] = rgbToHsv(r0, g0, b0);
     }
-    const [nr, ng, nb] = hsvToRgb(h, s, nv);
-    S.wheelV = nv;
+  };
+  const applyHsv = () => {
+    const [nr, ng, nb] = hsvToRgb(S.wh, S.ws, S.wheelV);
     S.fg = rgbToHex(nr, ng, nb);
     renderPalette();
     syncWheelUI();
     drawWheel();
   };
+  $("[data-hue]").oninput = (e) => {
+    ensureAnchors();
+    S.wh = Number(e.target.value) / 360;
+    applyHsv();
+  };
+  $("[data-sat]").oninput = (e) => {
+    ensureAnchors();
+    S.ws = Number(e.target.value) / 100;
+    applyHsv();
+  };
+  $("[data-val]").oninput = (e) => {
+    ensureAnchors();
+    S.wheelV = Number(e.target.value) / 100;
+    applyHsv();
+  };
+  // RGB 三滑块：改单通道重算 hex；灰色时留住色相锚点，切回 HSV 不丢色相
+  const setRgbChannel = (i, val) => {
+    const c = hexToRgba(S.fg);
+    c[i] = val;
+    const [h, s, v] = rgbToHsv(c[0], c[1], c[2]);
+    if (s > 0) {
+      S.wh = h;
+      S.ws = s;
+    }
+    S.wheelV = v;
+    S.fg = rgbToHex(c[0], c[1], c[2]);
+    renderPalette();
+    syncWheelUI();
+    drawWheel();
+  };
+  $("[data-r]").oninput = (e) => setRgbChannel(0, Number(e.target.value));
+  $("[data-g]").oninput = (e) => setRgbChannel(1, Number(e.target.value));
+  $("[data-b]").oninput = (e) => setRgbChannel(2, Number(e.target.value));
+  // HSV / RGB 滑块切换（选择存进偏好）
+  const setCmode = (m) => {
+    S.cmode = m;
+    $('[data-hsvbox]').hidden = m !== "hsv";
+    $('[data-rgbbox]').hidden = m !== "rgb";
+    root.querySelectorAll("[data-cmode]").forEach((b) =>
+      b.classList.toggle("active", b.dataset.cmode === m)
+    );
+  };
+  root.querySelectorAll("[data-cmode]").forEach((b) => (b.onclick = () => setCmode(b.dataset.cmode)));
+  setCmode(S.cmode);
   $("[data-hex]").onchange = (e) => {
     let v = e.target.value.trim();
     if (!v.startsWith("#")) v = `#${v}`;
@@ -689,7 +825,10 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
       rows.push(`
         <div class="layer${i === S.doc.active ? " on" : ""}" data-li="${i}" draggable="true">
           <canvas width="${S.doc.w}" height="${S.doc.h}"></canvas>
-          <button class="tool-btn icon-btn" data-eye title="显示/隐藏">${ic(l.visible ? "eye" : "eyeOff")}</button>
+          <div class="layer-ops">
+            <button class="tool-btn icon-btn layer-op${l.visible ? "" : " active"}" data-eye title="显示/隐藏">${ic(l.visible ? "eye" : "eyeOff")}</button>
+            <button class="tool-btn icon-btn layer-op${l.alphaLock ? " active" : ""}" data-lock title="${l.alphaLock ? "不透明度已锁定：点击解锁" : "不透明度未锁定：点击锁定，锁定后已有像素只能改色"}">${ic(l.alphaLock ? "lock" : "lockOpen")}</button>
+          </div>
           <span class="layer-name" title="拖动排序，单击选中，双击重命名">${esc(l.name)}</span>
         </div>`);
     }
@@ -712,13 +851,24 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
       afterEdit();
       return;
     }
+    if (e.target.closest("[data-lock]")) {
+      pushHistory();
+      const l = S.doc.layers[i];
+      l.alphaLock = !l.alphaLock;
+      afterEdit();
+      return;
+    }
     if (S.doc.active === i) return; // 已选中不再重绘，否则连击重命名会被打断
     if (S.sel?.floating) {
       // 有浮动像素：先落回原层，再切（否则像素会被贴到新层去）
       S.doc.active = selLi();
       commitSel();
     }
-    if (S.sel) S.sel.li = i; // 纯框选跟随活动层：在哪层圈的，换到哪层都生效
+    if (S.sel) {
+      S.sel = null;
+      render();
+      syncBar();
+    }
     S.doc.active = i;
     renderLayers();
   });
@@ -975,7 +1125,7 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
       const t = document.activeElement;
       return t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
     };
-    document.addEventListener("keydown", (e) => {
+    on(document, "keydown", (e) => {
       if ((e.key === "z" || e.key === "Z") && !e.repeat && !e.ctrlKey && !e.metaKey && !typing() && !S.layerDrag) {
         zDown = true;
         if (hoverLi >= 0) {
@@ -984,14 +1134,14 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
         }
       }
     });
-    document.addEventListener("keyup", (e) => {
+    on(document, "keyup", (e) => {
       if (e.key === "z" || e.key === "Z") {
         zDown = false;
         hide();
         if (hoverLi >= 0) update();
       }
     });
-    window.addEventListener("blur", () => {
+    on(window, "blur", () => {
       zDown = false;
       hide();
     });
@@ -999,6 +1149,9 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
   const layerBtns = {
     "data-l-add": () => {
       if (insertLayerAbove(S.doc, S.doc.active) < 0) uiAlert("最多 8 层，先合并吧");
+    },
+    "data-l-dup": () => {
+      if (duplicateLayer(S.doc, S.doc.active) < 0) uiAlert("最多 8 层，先合并吧");
     },
     "data-l-up": () => moveLayer(S.doc, S.doc.active, 1),
     "data-l-down": () => moveLayer(S.doc, S.doc.active, -1),
@@ -1010,16 +1163,31 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
     },
   };
   root.querySelector(".ed-side").addEventListener("click", async (e) => {
+    if (e.target.closest("[data-l-clear]")) {
+      const l = S.doc.layers[S.doc.active];
+      if (l.alphaLock) {
+        uiAlert("这层已锁定不透明度，先解锁再清空");
+        return;
+      }
+      if (await uiConfirm(`清空「${l.name}」的像素？图层保留，可撤销。`, "清空")) {
+        if (S.sel?.floating) S.sel = null; // 浮动像素随清空一起丢，不再落回
+        pushHistory();
+        l.pixels.fill(0);
+        afterEdit();
+      }
+      return;
+    }
     if (e.target.closest("[data-l-del]")) {
       if (S.doc.layers.length > 1 && (await uiConfirm(`删除「${S.doc.layers[S.doc.active].name}」？可撤销。`))) {
         if (S.sel?.floating) S.sel = null; // 浮动跟随删掉的层一起走，不单独落回
         pushHistory();
         deleteLayer(S.doc, S.doc.active);
-        if (S.sel && !S.sel.floating) S.sel.li = S.doc.active; // 纯框选跟随活动层
+        S.sel = null;
         afterEdit();
       } else if (S.doc.layers.length <= 1) {
-        // 只有一层时，删除当前层 = 清空画布
-        if (await uiConfirm("清空画布，继续？", "清空")) {
+        // 只有一层时，删除当前层 = 清空这层像素
+        if (await uiConfirm("这是最后一层：清空它的全部像素？可撤销。", "清空")) {
+          S.sel = null;
           pushHistory();
           S.doc.layers[0].pixels.fill(0);
           afterEdit();
@@ -1033,9 +1201,10 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
           S.doc.active = selLi();
           commitSel(); // 合并前先落回原层，否则浮动像素会被吞掉
         }
+        const prevActive = S.doc.active;
         pushHistory();
         await fn();
-        if (S.sel && !S.sel.floating && attr !== "data-l-add") S.sel.li = S.doc.active; // 纯框选跟随活动层（新建层不抢）
+        if (S.sel && !S.sel.floating && S.doc.active !== prevActive) S.sel = null;
         afterEdit();
         return;
       }
@@ -1222,6 +1391,7 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
   function afterEdit() {
     render();
     renderLayers();
+    if (S.cloudId) setTimeout(refreshEdVersions, 400);
     if (S.cloudId && S.user) {
       // 云端模式：落笔防抖 2s 存 + 30s 兜底（见下方 interval）
       S.dirty = true;
@@ -1241,10 +1411,19 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
     }
   }
 
+  let statusTimer = 0;
   function cloudStatus(text) {
+    clearTimeout(statusTimer);
     const el = $("[data-cloud-status]");
     if (text) {
       el.textContent = text;
+      return;
+    }
+    if (S.slotNote) {
+      const note = S.slotNote;
+      S.slotNote = null;
+      el.textContent = note;
+      statusTimer = setTimeout(() => cloudStatus(), 5000);
       return;
     }
     el.textContent = S.cloudId
@@ -1266,16 +1445,30 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
     } catch {
       return true;
     }
-    if (vs.length < 15) return true;
-    const pick = await uiChoice({
-      title: "手动存档已满（15 个）",
-      msg: "这个作品的手动备份位用完了（自动保存不受影响）。请先腾个地方（不推荐直接取消）。",
-      choices: [
-        { value: "copy", label: "新建作品副本", primary: true },
-        { value: "clean", label: "清理最老存档" },
-        { value: "cancel", label: "取消保存" },
-      ],
-    });
+    if (vs.length < MAX_MANUAL_VERSIONS) return true;
+    // 勾选过“不再提示”：直接按记住的方式腾位，不再弹窗
+    let pick = null;
+    try {
+      const pref = localStorage.getItem(VERSFULL_KEY);
+      if (pref === "clean" || pref === "copy") pick = pref;
+    } catch { /* ignore */ }
+    if (!pick) {
+      const r = await uiChoice({
+        title: `手动存档已满（${MAX_MANUAL_VERSIONS} 个）`,
+        msg: "这个作品的手动备份位用完了（自动保存不受影响）。请先腾个地方（不推荐直接取消）。",
+        choices: [
+          { value: "copy", label: "新建作品副本", primary: true },
+          { value: "clean", label: "清理最老存档" },
+          { value: "cancel", label: "取消保存" },
+        ],
+        checkLabel: "不再提示，以后都这样做（可在草稿箱重新开启询问）",
+      });
+      if (!r) return false; // 取消（含 Esc / 点遮罩）
+      pick = r.value;
+      if (r.checked && (pick === "clean" || pick === "copy")) {
+        try { localStorage.setItem(VERSFULL_KEY, pick); } catch { /* ignore */ }
+      }
+    }
     if (pick === "copy") {
       // 先把当前已落盘的状态另存一份副本
       const dr = await api("POST", `/api/drafts/${draftId}/duplicate`);
@@ -1283,6 +1476,7 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
         uiAlert("建副本失败，稍后重试");
         return false;
       }
+      S.slotNote = "存档已满：已自动另存为副本";
       // 保存时直接搬到副本上继续：历史记录清零；回滚则仍在原稿腾位继续
       if (forSave) return { fork: dr.data.draft };
     } else if (pick !== "clean") {
@@ -1294,6 +1488,7 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
       uiAlert("清理失败，重试一下");
       return false;
     }
+    S.slotNote = "存档已满：已自动清理最老存档";
     return true;
   }
 
@@ -1343,6 +1538,7 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
       }
       S.dirty = false;
       cloudStatus();
+      if (S.cloudId) setTimeout(refreshEdVersions, 350);
       track("save"); // T70 保存转化
       return true;
     } catch {
@@ -1351,12 +1547,18 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
     }
   }
 
+  async function flushCloudSave() {
+    if (!S.dirty || !S.cloudId || !S.user) return true;
+    return saveCloud(true);
+  }
+
   // 30s 兜底保存（只在画布页且有脏数据时）
   if (window.__pxTimer) clearInterval(window.__pxTimer);
   window.__pxTimer = setInterval(() => {
     if (location.hash.startsWith("#/draw") && S.dirty && S.cloudId && S.user)
       saveCloud(true);
   }, 30000);
+  cleanups.push(() => clearInterval(window.__pxTimer));
 
   function exportPNG() {
     const scale = Number($("[data-scale]").value) || 4;
@@ -1401,6 +1603,10 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
       return;
     }
     if (countOpaque(composite(S.doc)) > 0 && !(await uiConfirm("载入会替换当前画布，继续？"))) return;
+    if (!(await flushCloudSave())) {
+      uiAlert("当前画布保存失败，请先重试保存，避免丢失未保存的改动。");
+      return;
+    }
     S.doc = d;
     S.doc.active = Math.min(d.active || 0, d.layers.length - 1);
     S.undo.length = 0;
@@ -1483,7 +1689,9 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
     const c = composite(S.doc);
     const i = (y * S.doc.w + x) * 4;
     if (c[i + 3] <= 0) return false;
-    pickColor(`#${[c[i], c[i + 1], c[i + 2]].map((v) => v.toString(16).padStart(2, "0")).join("")}`);
+    const hex = `#${[c[i], c[i + 1], c[i + 2]].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+    pickColor(hex);
+    noteRecentColor(hex); // 取色即用过
     return true;
   }
   view.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -1536,6 +1744,7 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
     if (S.tool === "bucket") {
       pushHistory();
       floodFill(S.doc, S.doc.active, x, y, hexToRgba(S.fg), S.tol);
+      noteRecentColor(S.fg);
       afterEdit();
       return;
     }
@@ -1562,6 +1771,7 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
     S.drawing = true;
     S.last = [x, y];
     S.ppHist = [[x, y]];
+    if (S.tool === "pencil") noteRecentColor(S.fg);
     dab(x, y, S.tool === "eraser" ? ERASER : hexToRgba(S.fg));
     render();
   });
@@ -1651,6 +1861,7 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
       const [sx, sy] = S.shapeStart;
       for (const [px, py] of shapePts(S.tool, sx, sy, x, y))
         setPixel(S.doc, S.doc.active, px, py, hexToRgba(S.fg));
+      noteRecentColor(S.fg);
       octx.clearRect(0, 0, over.width, over.height);
       afterEdit();
     } else if (S.tool === "select") {
@@ -1921,7 +2132,7 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
       const mx = e.clientX - r.left;
       const my = e.clientY - r.top;
       const oz = S.zoom;
-      const nz = Math.min(32, Math.max(1, oz + (e.deltaY < 0 ? 2 : -2)));
+      const nz = Math.min(32, Math.max(1, oz + (e.deltaY < 0 ? 1 : -1)));
       if (nz === oz) return;
       setZoom(nz);
       stage.scrollLeft += mx * (nz / oz - 1);
@@ -2064,7 +2275,11 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
     }
     syncMbgUI();
   };
-  $("[data-mok]").onclick = () => {
+  $("[data-mok]").onclick = async () => {
+    if (!(await flushCloudSave())) {
+      uiAlert("当前画布保存失败，请先重试保存，避免丢失未保存的改动。");
+      return;
+    }
     const w = Number($('[data-mwidth]').value);
     const h = Number($('[data-mheight]').value);
     try {
@@ -2086,7 +2301,8 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
   });
 
   // ---- 快捷键 ----
-  document.addEventListener("keydown", (e) => {
+  on(document, "keydown", (e) => {
+    if (hasOpenDialog()) return;
     const t = e.target;
     if (t.matches("input, textarea, select")) return;
     const k = e.key.toLowerCase();
@@ -2141,7 +2357,7 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
       stage.style.cursor = "grab";
     }
   });
-  document.addEventListener("keyup", (e) => {
+  on(document, "keyup", (e) => {
     if (e.key === " ") {
       S.spaceDown = false;
       if (!S.panning) stage.style.cursor = "";
@@ -2151,6 +2367,16 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
   function loadPersonal() {
     try {
       return JSON.parse(localStorage.getItem(PERSONAL_KEY) || "[]");
+    } catch {
+      return [];
+    }
+  }
+
+  function loadRecent() {
+    try {
+      const a = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
+      if (!Array.isArray(a)) return [];
+      return a.filter((c) => typeof c === "string" && /^#[0-9a-f]{6}$/i.test(c)).slice(0, 16);
     } catch {
       return [];
     }
@@ -2186,6 +2412,7 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
   }
 
   renderPalette();
+  renderRecent();
   fitZoom();
   paintCheckerBg();
   render();
@@ -2305,7 +2532,7 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
       const full = await api('GET', `/api/drafts/${S.cloudId}`);
       S.doc = deserialize(full.data.draft.layers_json);
       lastSavedDoc = full.data.draft.layers_json;
-      S.doc.active = Math.min(full.data.draft.layers_json ? 0 : 0, S.doc.layers.length - 1);
+      S.doc.active = Math.min(S.doc.active || 0, S.doc.layers.length - 1);
       S.undo.length = 0;
       S.redo.length = 0;
       S.sel = null;
@@ -2425,7 +2652,7 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
       const l = edVersList();
       return l && !l.hidden && l.contains(o) ? o : null;
     };
-    document.addEventListener('mousemove', (e) => {
+    on(document, 'mousemove', (e) => {
       const o = optInOurList(e.target);
       if (o) {
         lastX = e.clientX; lastY = e.clientY;
@@ -2438,7 +2665,7 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
     let vzFired = false;
     let vzX = 0;
     let vzY = 0;
-    document.addEventListener('touchstart', (e) => {
+    on(document, 'touchstart', (e) => {
       if (e.touches.length !== 1) return;
       const o = optInOurList(e.target);
       if (!o) return;
@@ -2460,7 +2687,7 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
         update();
       }, 500);
     }, { passive: true });
-    document.addEventListener('touchmove', (e) => {
+    on(document, 'touchmove', (e) => {
       if (!vzTimer || !e.touches.length) return;
       const t = e.touches[0];
       if (Math.hypot(t.clientX - vzX, t.clientY - vzY) > 12) {
@@ -2468,7 +2695,7 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
         vzTimer = null;
       }
     }, { passive: true });
-    document.addEventListener('touchend', (e) => {
+    on(document, 'touchend', (e) => {
       if (vzTimer) {
         clearTimeout(vzTimer);
         vzTimer = null;
@@ -2482,7 +2709,7 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
       hoverVid = null;
       hide();
     }, { passive: false });
-    document.addEventListener('touchcancel', () => {
+    on(document, 'touchcancel', () => {
       if (vzTimer) {
         clearTimeout(vzTimer);
         vzTimer = null;
@@ -2495,7 +2722,8 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
     });
     edVersSel.addEventListener('change', () => { if (hoverVid != null && zDown) update(); });
     // 绘画页没有草稿箱的全局 Z 状态，这里自己管 zDown（编辑器本身只占用 ctrl+Z，单按 Z 无冲突）
-    document.addEventListener('keydown', (e) => {
+    on(document, 'keydown', (e) => {
+      if (hasOpenDialog()) return;
       if ((e.key === 'z' || e.key === 'Z') && !e.repeat && !e.ctrlKey && !e.metaKey && !isTyping()) {
         zDown = true;
         if (hoverVid != null) { e.preventDefault(); update(); }
@@ -2519,7 +2747,8 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
       }
       refreshEdVersions();
     }
-    document.addEventListener('keydown', (e) => {
+    on(document, 'keydown', (e) => {
+      if (hasOpenDialog()) return;
       if ((e.key === 'd' || e.key === 'D') && !e.repeat && !e.ctrlKey && !e.metaKey && !isTyping()) {
         const vid = hoverVid ?? edVersSel.value;
         if (!vid || !S.cloudId || S.drawing) return;
@@ -2527,22 +2756,10 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
         delEdVersion(vid);
       }
     });
-    document.addEventListener('keyup', (e) => { if (e.key === 'z' || e.key === 'Z') { zDown = false; hide(); if (hoverVid != null) update(); } });
-    window.addEventListener('blur', () => { zDown = false; hide(); });
+    on(document, 'keyup', (e) => { if (e.key === 'z' || e.key === 'Z') { zDown = false; hide(); if (hoverVid != null) update(); } });
+    on(window, 'blur', () => { zDown = false; hide(); });
   })();
   refreshEdVersions();
-  // 保存后刷新版本列表（首次新建POST会填上 S.cloudId）
-  const _origSaveCloud2 = saveCloud;
-  // eslint-disable-next-line no-func-assign
-  saveCloud = async function (...args) {
-    const ret = await _origSaveCloud2(...args);
-    if (S.cloudId) setTimeout(refreshEdVersions, 350);
-    return ret;
-  };
-  // 保存后刷新版本列表
-  const _origAfterEdit = afterEdit;
-  // eslint-disable-next-line no-func-assign
-  afterEdit = function () { _origAfterEdit(); if (S.cloudId) setTimeout(refreshEdVersions, 400); };
 
   // 偏好持久化：工具/笔刷/视图/前景色，10 秒一存 + 离页存
   function savePrefs() {
@@ -2560,16 +2777,27 @@ export function mountEditor(root, { guestKey = "pixel.guest", cloud = null, user
         showGrid: S.showGrid,
         showMore: S.showMore,
         fg: S.fg,
-        bg: S.bg,
+        cmode: S.cmode,
       }));
     } catch {
       /* 配额满就放弃 */
     }
   }
-  if (!window.__pxPrefsTimer) window.__pxPrefsTimer = setInterval(savePrefs, 10000);
-  window.addEventListener("pagehide", savePrefs);
+  // 偏好定时器跟随本次挂载（之前用全局守卫只武装首次实例，之后一直拿旧 S 写盘）
+  const prefsTimer = setInterval(savePrefs, 10000);
+  cleanups.push(() => clearInterval(prefsTimer));
+  on(window, "pagehide", savePrefs);
 
   return {
+    unmount() {
+      clearTimeout(saveTimer);
+      clearTimeout(statusTimer);
+      if (S.dirty && S.cloudId && S.user) void saveCloud(true);
+      else {
+        try { localStorage.setItem(guestKey, serialize(S.doc)); } catch { /* 配额满就放弃 */ }
+      }
+      while (cleanups.length) cleanups.pop()();
+    },
     get doc() {
       return S.doc;
     },

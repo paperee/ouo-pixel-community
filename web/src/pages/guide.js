@@ -30,7 +30,7 @@ function pageInfo() {
       </div>
       <div class="px-card fact fact--mail">
         <p class="fact-label">联系</p>
-        <p class="fact-text"><a class="chip" href="mailto:paperee57@gmail.com">paperee57@gmail.com</a> <a class="chip" href="mailto:admin@paperee.guru">admin@paperee.guru</a></p>
+        <p class="fact-text"><a class="chip" href="mailto:150361308@qq.com">150361308@qq.com</a> <a class="chip" href="mailto:paperee57@gmail.com">paperee57@gmail.com</a></p>
       </div>
     </div>
     <div class="px-card guide-block">

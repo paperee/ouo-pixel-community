@@ -1,6 +1,6 @@
 // 草稿箱：列表/版本/发布/回滚/行内操作
 import { api, track } from "../api.js";
-import { composite, deserialize, u8ToB64 } from "../editor/doc.js";
+import { composite, deserialize, MAX_MANUAL_VERSIONS, u8ToB64 } from "../editor/doc.js";
 import { uiAlert, uiChoice, uiConfirm, uiPrompt } from "../dialog.js";
 import { ART_TAGS, PERM_OPTIONS, esc, flagsOf } from "./shared.js";
 import { canvasToB64, extractPalette } from "./image.js";
@@ -9,6 +9,7 @@ import { getPagerKeyboardPage } from "./pagination-keyboard.js";
 
 let currentDraftPage = 1;
 let latestDraftLoad = 0;
+const VERSFULL_KEY = "pixel.versfull"; // 存档满自动处理偏好，与画板共用；草稿箱里可恢复询问
 
 function draftPreviewUrl(draft) {
   try {
@@ -288,7 +289,7 @@ export async function publishRow(row, draftId) {
   }
 }
 
-// 备份位门禁（草稿箱）：同个草稿最多 16 个历史备份，满了先问用户腾地方
+// 备份位门禁（草稿箱）：15 个手动存档 + 1 个独立自动存档，满了先问用户腾地方
 export async function ensureDraftSlot(draftId) {
   let vs = [];
   try {
@@ -298,16 +299,30 @@ export async function ensureDraftSlot(draftId) {
   } catch {
     return true;
   }
-  if (vs.length < 15) return true;
-  const pick = await uiChoice({
-    title: "手动存档已满（15 个）",
-    msg: "这个作品的手动备份位用完了（自动保存不受影响）。请先腾个地方（不推荐直接取消）。",
-    choices: [
-      { value: "copy", label: "新建作品副本", primary: true },
-      { value: "clean", label: "清理最老存档" },
-      { value: "cancel", label: "取消保存" },
-    ],
-  });
+  if (vs.length < MAX_MANUAL_VERSIONS) return true;
+  // 与画板共用同一份“不再提示”偏好（pixel.versfull）：有值就自动腾位，不弹窗
+  let pick = null;
+  try {
+    const pref = localStorage.getItem(VERSFULL_KEY);
+    if (pref === "clean" || pref === "copy") pick = pref;
+  } catch { /* ignore */ }
+  if (!pick) {
+    const r = await uiChoice({
+      title: `手动存档已满（${MAX_MANUAL_VERSIONS} 个）`,
+      msg: "这个作品的手动备份位用完了（自动保存不受影响）。请先腾个地方（不推荐直接取消）。",
+      choices: [
+        { value: "copy", label: "新建作品副本", primary: true },
+        { value: "clean", label: "清理最老存档" },
+        { value: "cancel", label: "取消保存" },
+      ],
+      checkLabel: "不再提示，以后都这样做（可在草稿箱重新开启询问）",
+    });
+    if (!r) return false;
+    pick = r.value;
+    if (r.checked && (pick === "clean" || pick === "copy")) {
+      try { localStorage.setItem(VERSFULL_KEY, pick); } catch { /* ignore */ }
+    }
+  }
   if (pick === "copy") {
     const dr = await api("POST", `/api/drafts/${draftId}/duplicate`);
     if (dr.status !== 201) {
@@ -327,6 +342,22 @@ export async function ensureDraftSlot(draftId) {
 }
 
 export function wireDrafts() {
+  // 存档满自动处理（“不再提示”勾选后生效）：在草稿箱显示当前策略，点击恢复每次询问
+  const resetBtn = document.querySelector("#versfull-reset");
+  if (resetBtn) {
+    const syncReset = () => {
+      let v = null;
+      try { v = localStorage.getItem(VERSFULL_KEY); } catch { /* ignore */ }
+      resetBtn.hidden = !(v === "clean" || v === "copy");
+      resetBtn.textContent = v === "clean" ? "存档满：自动清最老 ↩" : "存档满：自动建副本 ↩";
+      resetBtn.title = "手动存档满 15 个时不再询问，点我恢复每次询问";
+    };
+    syncReset();
+    resetBtn.onclick = () => {
+      try { localStorage.removeItem(VERSFULL_KEY); } catch { /* ignore */ }
+      syncReset();
+    };
+  }
   const box = document.querySelector("#draft-list");
   box.onclick = async (e) => {
     const pageButton = e.target.closest("[data-draft-page]");

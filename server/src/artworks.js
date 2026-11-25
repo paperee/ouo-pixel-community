@@ -161,11 +161,12 @@ artworksRouter.get("/gallery", (req, res) => {
   const items = db
     .prepare(
       `SELECT a.id, a.title, a.png_url, a.width, a.height, a.likes_count, a.comments_count,
-        a.views, a.created_at, a.author_id, u.nickname AS author_name
+        a.views, a.created_at, a.author_id, u.nickname AS author_name,
+        EXISTS(SELECT 1 FROM likes l WHERE l.user_id = ? AND l.artwork_id = a.id) AS liked
        FROM artworks a JOIN users u ON u.id = a.author_id
        WHERE ${where} ORDER BY ${order} LIMIT ? OFFSET ?`
     )
-    .all(limit + 1, off);
+    .all(req.session.userId || 0, limit + 1, off);
   // 防屠榜：热门榜单同一作者最多占 3 席
   let out = items;
   if (tab === "hot") {

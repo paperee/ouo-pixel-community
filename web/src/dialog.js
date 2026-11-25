@@ -16,6 +16,7 @@ function ensure() {
           <span class="hint" data-dlg-keys></span>
         </div>
         <div class="stack" data-dlg-choices hidden></div>
+        <label class="hint dlg-check" data-dlg-checkrow hidden><input type="checkbox" data-dlg-check> <span data-dlg-checklab></span></label>
       </div>
     </div>`;
   document.body.appendChild(wrap);
@@ -33,6 +34,9 @@ function ensure() {
     cancel: wrap.querySelector("[data-dlg-cancel]"),
     keys: wrap.querySelector("[data-dlg-keys]"),
     choices: wrap.querySelector("[data-dlg-choices]"),
+    checkrow: wrap.querySelector("[data-dlg-checkrow]"),
+    check: wrap.querySelector("[data-dlg-check]"),
+    checklab: wrap.querySelector("[data-dlg-checklab]"),
   };
   // 快捷键：Enter 确定（含输入框内回车，输入法组字中不触发），Esc 取消；
   // 空格同确认，但输入框里敲空格是打字，不触发；
@@ -59,7 +63,7 @@ function ensure() {
   return els;
 }
 
-export function uiDialog({ title = "请确认", msg = "", input = null, okText = "确定", cancelText = "取消", choices = null } = {}) {
+export function uiDialog({ title = "请确认", msg = "", input = null, okText = "确定", cancelText = "取消", choices = null, checkLabel = "" } = {}) {
   const d = ensure();
   return new Promise((resolve) => {
     d.title.textContent = title;
@@ -68,10 +72,15 @@ export function uiDialog({ title = "请确认", msg = "", input = null, okText =
     d.cancel.textContent = cancelText;
     const useChoices = Array.isArray(choices) && choices.length > 0;
     const useInput = !useChoices && input !== null && input !== undefined;
+    // 勾选框只跟选项组用：勾选后 resolve { value, checked }，否则保持纯 value
+    const useCheck = useChoices && !!checkLabel;
     d.input.hidden = !useInput;
     d.ok.style.display = useChoices ? "none" : "";
     d.cancel.style.display = useChoices ? "none" : useInput || okText !== "知道了" ? "" : "none";
     d.choices.hidden = !useChoices;
+    d.checkrow.hidden = !useCheck;
+    d.check.checked = false;
+    if (useCheck) d.checklab.textContent = checkLabel;
     d.choices.innerHTML = useChoices
       ? choices.map((c, i) => `<button class="px-btn${c.primary ? " px-btn--cherry" : ""}" data-dlg-pick="${i}">${c.label}</button>`).join("")
       : "";
@@ -89,7 +98,8 @@ export function uiDialog({ title = "请确认", msg = "", input = null, okText =
       d.choices.onclick = (e) => {
         const b = e.target.closest("[data-dlg-pick]");
         if (!b) return;
-        done(choices[Number(b.dataset.dlgPick)].value);
+        const v = choices[Number(b.dataset.dlgPick)].value;
+        done(useCheck ? { value: v, checked: d.check.checked } : v);
       };
     } else if (useInput) {
       d.input.value = input;
@@ -109,6 +119,7 @@ export const uiAlert = (msg) => uiDialog({ title: "提示", msg, okText: "知道
 export const uiConfirm = (msg, okText = "确定") => uiDialog({ title: "请确认", msg, okText });
 export const uiPrompt = (msg, def = "") => uiDialog({ title: "输入", msg, input: def });
 export const uiNotice = (msg) => uiDialog({ title: "社区公告", msg, okText: "确认", cancelText: "不再显示" });
-// 三选一（备份位满时用）：resolve 选中项的 value，Esc/点遮罩算 null
-export const uiChoice = ({ title = "请选择", msg = "", choices = [] } = {}) =>
-  uiDialog({ title, msg, choices });
+// 三选一（备份位满时用）：resolve 选中项的 value，Esc/点遮罩算 null；
+// 传 checkLabel 时带“不再提示”勾选框，resolve 变为 { value, checked }
+export const uiChoice = ({ title = "请选择", msg = "", choices = [], checkLabel = "" } = {}) =>
+  uiDialog({ title, msg, choices, checkLabel });

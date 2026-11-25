@@ -748,6 +748,46 @@ textarea.px-input {
   background: repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 0 / 16px 16px;
 }
 
+/* 卡片底部行：统计文字在左，点赞小按钮靠右 */
+.art-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.like-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  font-family: var(--font-title);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.like-mini .px-ic {
+  width: 12px;
+  height: 12px;
+}
+
+.like-mini:hover {
+  background: var(--accent-tint);
+}
+
+/* 点过赞：浅粉底 + 深粉图标，不用实心粉（小按钮上太冲） */
+.like-mini.on {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
 .art-detail {
   display: grid;
   grid-template-columns: 1fr 1.05fr;
@@ -1250,7 +1290,8 @@ a:not(.px-btn):not(.author-chip):not(.author-link):not(.logo):not(.px-title):not
   width: 22px;
   height: 22px;
 }
-#like-btn.liked-pop {
+#like-btn.liked-pop,
+.like-mini.liked-pop {
   animation: like-wiggle 0.45s ease;
 }
 @keyframes like-wiggle {
@@ -1261,7 +1302,8 @@ a:not(.px-btn):not(.author-chip):not(.author-link):not(.logo):not(.px-title):not
   100% { transform: scale(1) rotate(0deg); }
 }
 @media (prefers-reduced-motion: reduce) {
-  #like-btn.liked-pop {
+  #like-btn.liked-pop,
+  .like-mini.liked-pop {
     animation: none;
   }
 }

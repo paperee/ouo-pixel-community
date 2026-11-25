@@ -194,16 +194,23 @@
   flex-wrap: wrap;
 }
 
-/* 右侧栏调色板：每行 6 个均匀分布（只限作画页侧栏，不碰别处 .swatch） */
+/* 右侧栏调色板：每行 8 个均匀分布（只限作画页侧栏，不碰别处 .swatch） */
 .ed-side .swatches {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 6px;
 }
 .ed-side .swatch {
   width: 100%;
   height: auto;
   aspect-ratio: 1;
+}
+
+/* 历史颜色区：标签 + 色块格，整体比卡片默认间距紧凑 */
+.hist-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 /* 调色板标题行右侧的当前颜色：小圆点，不占行 */
@@ -412,6 +419,74 @@
   pointer-events: none;
 }
 
+/* HSV 滑块：轨道直接当色带，拇指用像素小方块（饱和/明度色带由 JS 跟随当前色相） */
+.cmode-row {
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+/* 切换钮小一号但别太扁：只是模式开关，不抢色轮的视觉重心 */
+.cmode-row .tool-btn {
+  flex: 1;
+  padding: 3px 8px;
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+.hsv-sliders {
+  gap: 8px;
+}
+
+.hsv-sliders .tool-lab {
+  flex-wrap: nowrap;
+}
+
+/* 数值读数：右对齐等宽，跳数时滑块不跟着抖 */
+.hsv-sliders .tool-lab b {
+  min-width: 3ch;
+  text-align: right;
+}
+
+.hsv-sliders input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  min-width: 0;
+  height: 12px;
+  border: var(--border-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+  cursor: pointer;
+}
+
+.hsv-sliders input[data-hue] {
+  background: linear-gradient(90deg, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+}
+
+.hsv-sliders input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 18px;
+  margin-top: -5px;
+  background: var(--paper);
+  border: var(--border-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+}
+
+.hsv-sliders input[type="range"]::-moz-range-track {
+  background: transparent;
+  border: none;
+}
+
+.hsv-sliders input[type="range"]::-moz-range-thumb {
+  width: 10px;
+  height: 18px;
+  background: var(--paper);
+  border: var(--border-w) solid var(--ink);
+  border-radius: var(--radius-sm);
+}
+
 /* hex 下划线输入 + 与明度同行 */
 .hex-row {
   align-items: center;
@@ -445,9 +520,15 @@
   border-color: var(--accent);
 }
 
-/* 图层按钮 2 行 x 3 列 */
+/* 图层按钮 4 列 x 2 行 */
+.ed-side .icon-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
 .ed-side .icon-row .tool-btn {
-  flex: 1 1 28%;
+  width: 100%;
 }
 
 /* 预设色盘下拉 */
@@ -527,6 +608,16 @@
 
 .dlg .px-input {
   width: 100%;
+}
+
+/* “不再提示”勾选行：贴在选项组下面，低调小字 */
+.dlg-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  cursor: pointer;
+  user-select: none;
 }
 
 /* 抽屉开关（状态条里的“面板”组）：桌面端隐藏，窄屏按阶段出现 */
@@ -862,4 +953,31 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 图层行小按钮列：显隐在上、不透明度锁定在下，比工具条按钮小一号 */
+.layer-ops {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: none;
+}
+
+.layer-op {
+  width: 20px;
+  height: 20px;
+  padding: 2px;
+}
+
+.layer-op .px-ic {
+  width: 12px;
+  height: 12px;
+}
+
+/* 显隐/锁定小按钮：默认黑色，切到“隐藏/锁定”态才浅粉高亮 */
+.layer-op.active,
+.layer-op.active:hover {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+  color: var(--accent-deep);
 }

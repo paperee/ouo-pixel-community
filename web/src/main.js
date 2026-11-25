@@ -9,7 +9,7 @@ import { initCustomScroll } from "./scroll.js";
 import { initPixelSelects } from "./pixel-select.js";
 import { initPixelTips } from "./tooltip.js";
 import { uiAlert, uiNotice } from "./dialog.js";
-import { layoutArtGrid, loadGallery, mountHomeEdge, pageHome, wireArtGrids, wireGalleryInfinite, wireGalleryTabs, wireHomeEgg } from "./pages/home.js";
+import { layoutArtGrid, loadGallery, mountHomeEdge, pageHome, wireArtGrids, wireGalleryInfinite, wireGalleryLikes, wireGalleryTabs, wireHomeEgg } from "./pages/home.js";
 import { pageAuth, wireAuthForm } from "./pages/auth.js";
 import { pageMe, pageUser, wireMePage } from "./pages/me.js";
 import { loadDrafts, loadPublished, wireDrafts } from "./pages/drafts.js";
@@ -98,6 +98,12 @@ async function render() {
   const { status, data } = await getMe().catch(() => ({ status: 0 }));
   const user = status === 200 ? data.user : null;
   const hash = location.hash || "#/";
+
+  // 离开画板路由即卸载编辑器：摘掉全局监听/定时器，下次进来是干净实例
+  if (!hash.startsWith("#/draw") && window.__px) {
+    window.__px.unmount?.();
+    window.__px = null;
+  }
 
   if (hash.startsWith("#/login") && user) {
     location.hash = "#/";
@@ -202,6 +208,7 @@ async function render() {
         }
         if (!cloud && !initial) autoShowNew = true;
       }
+      window.__px?.unmount?.(); // 重进画板先卸掉旧实例
       const ed = mountEditor(document.querySelector("#draw-root"), { cloud, user, initial, autoShowNew });
       window.__px = ed; // e2e 钩子
     })();
@@ -211,7 +218,7 @@ async function render() {
       location.hash = "#/login";
       return;
     }
-    app.innerHTML = nav(user) + `<main class="wrap"><div class="row" style="align-items:center"><button class="px-btn px-btn--sm" id="drafts-back">← 返回</button><h1 class="px-title" style="margin:0">草稿箱</h1></div><h2 class="px-title px-title--sub">已发布作品</h2><div id="pub-list" class="stack"><p class="hint">读取中…</p></div><div class="row" style="justify-content:space-between;align-items:center;margin:22px 0 12px"><h2 class="px-title px-title--sub" style="margin:0">我的草稿</h2><button class="px-btn px-btn--sm" id="draft-import">源导入</button></div><div id="draft-list" class="stack"><p class="hint">读取中…</p></div></main>`;
+    app.innerHTML = nav(user) + `<main class="wrap"><div class="row" style="align-items:center"><button class="px-btn px-btn--sm" id="drafts-back">← 返回</button><h1 class="px-title" style="margin:0">草稿箱</h1></div><h2 class="px-title px-title--sub">已发布作品</h2><div id="pub-list" class="stack"><p class="hint">读取中…</p></div><div class="row" style="justify-content:space-between;align-items:center;margin:22px 0 12px"><h2 class="px-title px-title--sub" style="margin:0">我的草稿</h2><div class="row"><button class="px-btn px-btn--sm" id="versfull-reset" hidden></button><button class="px-btn px-btn--sm" id="draft-import">源导入</button></div></div><div id="draft-list" class="stack"><p class="hint">读取中…</p></div></main>`;
     wireNav();
     wireDrafts();
     wireDraftPreview();
@@ -346,6 +353,7 @@ async function render() {
   wireArtGrids();
   wireGalleryTabs();
   wireGalleryInfinite();
+  wireGalleryLikes();
   loadGallery(false);
   wireDraftPreview();
   if (hash === "#/" || hash === "" || hash === "#") {

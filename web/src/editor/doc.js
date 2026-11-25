@@ -1,6 +1,7 @@
 // 像素文档模型：纯逻辑，无 DOM，可在 node 里单测
-// 图层字段：name / visible / opacity(0-1) / blend(normal|multiply|overlay)
+// 图层字段：name / visible / opacity(0-1) / blend(normal|multiply|overlay) / alphaLock(锁透明：只许改色，不许动 alpha)
 export const MAX_LAYERS = 8;
+export const MAX_MANUAL_VERSIONS = 15;
 
 export function createLayer(w, h, name) {
   return {
@@ -8,6 +9,7 @@ export function createLayer(w, h, name) {
     visible: true,
     opacity: 1,
     blend: "normal",
+    alphaLock: false,
     pixels: new Uint8ClampedArray(w * h * 4),
   };
 }
@@ -31,6 +33,14 @@ export function setPixel(doc, li, x, y, rgba) {
   if (!inBounds(doc, x, y)) return false;
   const i = (y * doc.w + x) * 4;
   const p = doc.layers[li].pixels;
+  if (doc.layers[li].alphaLock) {
+    // 阿尔法锁定：透明区不上色，擦除（透明色）无效，已有像素只换 RGB、alpha 不动
+    if (rgba[3] === 0 || p[i + 3] === 0) return false;
+    p[i] = rgba[0];
+    p[i + 1] = rgba[1];
+    p[i + 2] = rgba[2];
+    return true;
+  }
   p[i] = rgba[0];
   p[i + 1] = rgba[1];
   p[i + 2] = rgba[2];
@@ -44,6 +54,15 @@ export function overPixel(doc, li, x, y, src, opacity = 1) {
   const i = (y * doc.w + x) * 4;
   const p = doc.layers[li].pixels;
   const ba = p[i + 3] / 255;
+  if (doc.layers[li].alphaLock) {
+    // 阿尔法锁定：橡皮直接无效；画笔只在已有像素上混色，alpha 保持原值
+    if (src[3] <= 0 || ba <= 0) return false;
+    const f = (src[3] / 255) * opacity;
+    p[i] = Math.round(src[0] * f + p[i] * (1 - f));
+    p[i + 1] = Math.round(src[1] * f + p[i + 1] * (1 - f));
+    p[i + 2] = Math.round(src[2] * f + p[i + 2] * (1 - f));
+    return true;
+  }
   if (src[3] <= 0) {
     // 橡皮：透明色叠加贡献为 0，改为按力度直接削减目标 alpha；
     // 擦到全透明时 RGB 一并归零，避免残留旧色干扰油漆桶/导出
@@ -81,6 +100,23 @@ export function insertLayerAbove(doc, i, name) {
   const at = Math.max(0, Math.min(i + 1, doc.layers.length));
   doc.layers.splice(at, 0, createLayer(doc.w, doc.h, name || `图层 ${doc.layers.length + 1}`));
   doc.active = at;
+  return doc.active;
+}
+
+// 复制 i 层（像素/不透明度/混合/阿尔法锁定全带走），副本插在原层上方并选中
+export function duplicateLayer(doc, i) {
+  if (doc.layers.length >= MAX_LAYERS || i < 0 || i >= doc.layers.length) return -1;
+  const src = doc.layers[i];
+  const copy = {
+    name: `${src.name} 副本`.slice(0, 12),
+    visible: src.visible,
+    opacity: src.opacity,
+    blend: src.blend || "normal",
+    alphaLock: !!src.alphaLock,
+    pixels: new Uint8ClampedArray(src.pixels),
+  };
+  doc.layers.splice(i + 1, 0, copy);
+  doc.active = i + 1;
   return doc.active;
 }
 
@@ -164,6 +200,7 @@ export function snapshot(doc) {
       visible: l.visible,
       opacity: l.opacity,
       blend: l.blend || "normal",
+      alphaLock: !!l.alphaLock,
       pixels: new Uint8ClampedArray(l.pixels),
     })),
   };
@@ -178,6 +215,7 @@ export function restore(doc, snap) {
     visible: l.visible,
     opacity: l.opacity,
     blend: l.blend || "normal",
+    alphaLock: !!l.alphaLock,
     pixels: new Uint8ClampedArray(l.pixels),
   }));
 }
@@ -208,6 +246,7 @@ export function serialize(doc) {
       visible: l.visible,
       opacity: l.opacity,
       blend: l.blend || "normal",
+      alphaLock: !!l.alphaLock,
       data: u8ToB64(l.pixels),
     })),
   });
@@ -222,6 +261,7 @@ export function deserialize(json) {
       visible: l.visible,
       opacity: l.opacity,
       blend: l.blend || "normal", // 兼容 P2 存的老草稿
+      alphaLock: !!l.alphaLock, // 老草稿没这字段，默认不锁
       pixels: b64ToU8(l.data),
     });
   }

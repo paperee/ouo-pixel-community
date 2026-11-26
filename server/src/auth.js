@@ -25,6 +25,9 @@ async function verifyPassword(pw, stored) {
 export function requireLogin(req, res, next) {
   if (!req.session.userId)
     return res.status(401).json({ error: "login_required" });
+  const u = db.prepare("SELECT banned FROM users WHERE id = ?").get(req.session.userId);
+  if (!u) return res.status(401).json({ error: "login_required" });
+  if (u.banned) return res.status(403).json({ error: "account_banned" });
   next();
 }
 
@@ -58,6 +61,31 @@ export const authRouter = Router();
 export function isAdminEmail(email) {
   const list = (process.env.ADMIN_EMAILS || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
   return list.includes(String(email || "").toLowerCase());
+}
+
+// 当前登录用户是否管理员（需要额外查一次库，仅在必须判定时调用）
+export function isAdminUser(userId) {
+  if (!userId) return false;
+  const me = db.prepare("SELECT email FROM users WHERE id = ?").get(userId);
+  return !!me && isAdminEmail(me.email);
+}
+
+// 管理员门禁：requireLogin 之后使用，全站统一入口
+export function requireAdmin(req, res, next) {
+  if (!isAdminUser(req.session.userId))
+    return res.status(403).json({ error: "forbidden" });
+  next();
+}
+
+// 管理操作审计：日志写库失败绝不挡主流程
+export function logAdmin(adminId, action, targetType = "", targetId = null, detail = "") {
+  try {
+    db.prepare(
+      "INSERT INTO admin_logs (admin_id, action, target_type, target_id, detail) VALUES (?, ?, ?, ?, ?)"
+    ).run(adminId, action, targetType, targetId, String(detail || "").slice(0, 200));
+  } catch {
+    /* 审计失败不影响操作本身 */
+  }
 }
 
 // 趣味接口：最新注册的用户（id 最大那位），供 #/user/latest 跳转；必须在 :id 前面
@@ -131,11 +159,13 @@ authRouter.post(
   async (req, res) => {
     const { email, password } = req.body || {};
     const row = db
-      .prepare(`SELECT ${PUBLIC_USER}, password_hash FROM users WHERE email = ?`)
+      .prepare(`SELECT ${PUBLIC_USER}, password_hash, banned FROM users WHERE email = ?`)
       .get(String(email || "").toLowerCase());
     if (!row || !(await verifyPassword(password || "", row.password_hash)))
       return res.status(401).json({ error: "bad_credentials" });
+    if (row.banned) return res.status(403).json({ error: "account_banned" });
     delete row.password_hash;
+    delete row.banned;
     row.avatar_url = publishedAvatar(row.id, row.avatar_url);
     req.session.userId = row.id;
     res.json({ user: row });

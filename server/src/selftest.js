@@ -277,9 +277,17 @@ const server = app.listen(0, async () => {
   check("me-works", r.status === 200 && r.json.items.length === 2 && r.json.drafts.some((draft) => draft.id === did && draft.png_url.startsWith("data:image/png;base64,") && Buffer.from(draft.png_url.split(",", 2)[1], "base64").readUInt32BE(16) === 4));
   r = await req("GET", "/api/admin/artworks");
   check("admin-artworks-forbidden", r.status === 403);
+  r = await req("GET", "/api/admin/admins");
+  check("admin-admins-forbidden", r.status === 403);
   process.env.ADMIN_EMAILS = "a@b.cn";
+  r = await req("GET", "/api/admin/admins");
+  check("admin-admins", r.status === 200 && r.json.items.some((x) => x.email === "a@b.cn" && x.nickname && typeof x.id === "number"));
   r = await req("GET", "/api/admin/pending");
   check("admin-pending", r.status === 200 && r.json.items.some((x) => x.id === pid));
+  check("admin-pending-report-fields", r.json.items.every((x) => typeof x.report_count === "number"));
+  // 待审作品详情：管理员能看（审核要看大图），陌生人不能看
+  r = await req("GET", `/api/artworks/${pid}`);
+  check("admin-view-pending", r.status === 200 && r.json.artwork.status === "pending");
   r = await req("PATCH", `/api/admin/${pid}`, JSON.stringify({ status: "featured" }));
   check("admin-feature", r.status === 200);
   r = await req("GET", "/api/gallery?tab=featured");
@@ -319,11 +327,22 @@ const server = app.listen(0, async () => {
   r = await req("GET", "/api/gallery?tab=new");
   check("gallery-hides-unpublished", r.status === 200 && r.json.items.every((x) => x.id !== unpubId));
   const cookieA1 = cookie;
+  r = await req("GET", "/api/admin/artworks?status=removed&limit=48");
+  check("admin-author-removed-list", r.status === 200 && r.json.items.find((x) => x.id === unpubId)?.removed_source === "author");
+  r = await req("PATCH", `/api/admin/${unpubId}`, JSON.stringify({ status: "normal" }));
+  check("admin-author-removed-locked", r.status === 403 && r.json.error === "author_removed");
+  r = await req("GET", `/api/artworks/${unpubId}`);
+  check("admin-author-removed-unchanged", r.status === 200 && r.json.artwork.status === "removed");
   cookie = "";
   r = await req("POST", "/api/login", JSON.stringify({ email: "b@c.cn", password: "secret12" }));
   r = await req("POST", `/api/artworks/${aid}/unpublish`);
   check("unpublish-other-forbidden", r.status === 403);
+  // 已下架作品：陌生人 404，管理员仍可查看（便于复核/恢复）
+  r = await req("GET", `/api/artworks/${pid}`);
+  check("removed-hidden-from-stranger", r.status === 404);
   cookie = cookieA1;
+  r = await req("GET", `/api/artworks/${pid}`);
+  check("removed-visible-to-admin", r.status === 200 && r.json.artwork.status === "removed");
 
   // ---- 公告板：公开读，管理员写 ----
   cookie = "";
@@ -466,6 +485,15 @@ const server = app.listen(0, async () => {
   r = await req("PATCH", `/api/artworks/${aid}`, JSON.stringify({ title: "黑改" }));
   check("rename-other-forbidden", r.status === 403);
   cookie = cookieA1;
+  // 防绕审：作者编辑命中敏感词 → 打回待审并通知作者，管理员可恢复
+  r = await req("PATCH", `/api/artworks/${aid2b}`, JSON.stringify({ title: "改名命中色情词" }));
+  check("edit-sensitive-rereview", r.status === 200 && r.json.status === "pending");
+  r = await req("GET", `/api/artworks/${aid2b}`);
+  check("edit-sensitive-shown", r.status === 200 && r.json.artwork.status === "pending");
+  r = await req("GET", "/api/notifications");
+  check("edit-sensitive-notif", (r.json.items || []).some((x) => x.type === "system" && String(x.extra || "").includes("待审")));
+  r = await req("PATCH", `/api/admin/${aid2b}`, JSON.stringify({ status: "normal" }));
+  check("edit-sensitive-restore", r.status === 200);
 
   // ---- 点赞评论通知 ----
   r = await req("POST", `/api/artworks/${aid}/like`);
@@ -648,6 +676,88 @@ const server = app.listen(0, async () => {
   check("block", r.status === 201);
   r = await req("DELETE", `/api/blocks/${bid}`);
   check("unblock", r.status === 200);
+
+  // ---- 举报处理闭环 ----
+  // B 举报 A 的作品 aid；非管理员看不了举报列表
+  cookie = "";
+  r = await req("POST", "/api/login", JSON.stringify({ email: "b@c.cn", password: "secret12" }));
+  r = await req("POST", "/api/reports", JSON.stringify({ artwork_id: aid, reason: "垃圾广告" }));
+  check("report-create", r.status === 201);
+  r = await req("GET", "/api/admin/reports");
+  check("reports-forbidden", r.status === 403);
+  cookie = cookieA2;
+  r = await req("GET", "/api/admin/reports?status=open");
+  check("reports-open", r.status === 200 && r.json.items.some((x) => x.artwork_id === aid && x.cnt >= 1));
+  check("reports-reporters", r.json.items.every((x) => String(x.reporters || "").includes("#")));
+  // 驳回：作品不受影响，举报人收到“暂未违规”反馈
+  r = await req("POST", "/api/admin/reports/handle", JSON.stringify({ artwork_id: aid, action: "dismiss" }));
+  check("report-dismiss", r.status === 200);
+  r = await req("GET", `/api/artworks/${aid}`);
+  check("report-dismiss-keeps-art", r.status === 200 && r.json.artwork.status === "normal");
+  // 再举报并下架处理；重复处理 → 404
+  cookie = "";
+  r = await req("POST", "/api/login", JSON.stringify({ email: "b@c.cn", password: "secret12" }));
+  r = await req("POST", "/api/reports", JSON.stringify({ artwork_id: aid, reason: "色情低俗" }));
+  check("report-again", r.status === 201);
+  cookie = cookieA2;
+  r = await req("POST", "/api/admin/reports/handle", JSON.stringify({ artwork_id: aid, action: "remove" }));
+  check("report-remove", r.status === 200);
+  r = await req("GET", "/api/gallery?tab=new&limit=24");
+  check("report-remove-hidden", r.json.items.every((x) => x.id !== aid));
+  r = await req("POST", "/api/admin/reports/handle", JSON.stringify({ artwork_id: aid, action: "remove" }));
+  check("report-handle-again", r.status === 404);
+  // 举报人收到两条处理反馈（驳回 + 已处理）
+  cookie = "";
+  r = await req("POST", "/api/login", JSON.stringify({ email: "b@c.cn", password: "secret12" }));
+  r = await req("GET", "/api/notifications");
+  const sysNotes = (r.json.items || []).filter((x) => x.type === "system");
+  check("report-feedback", sysNotes.some((x) => String(x.extra || "").includes("暂未违规")) && sysNotes.some((x) => String(x.extra || "").includes("已处理")));
+  // 评论举报：删除评论并结单
+  r = await req("POST", `/api/artworks/${aid}/remix`); // aid 已下架，B 不能 remix
+  check("report-removed-no-remix", r.status === 404);
+  cookie = cookieA2;
+  r = await req("GET", "/api/admin/artworks?status=removed");
+  check("admin-removed-list", r.status === 200 && r.json.items.some((x) => x.id === aid));
+  r = await req("PATCH", `/api/admin/${aid}`, JSON.stringify({ status: "normal" }));
+  check("admin-restore", r.status === 200);
+  // 评论举报：删除评论并结单（用 aid2b，aid 的评论接口在本进程内已触发限流）
+  cookie = "";
+  r = await req("POST", "/api/login", JSON.stringify({ email: "b@c.cn", password: "secret12" }));
+  r = await req("POST", `/api/artworks/${aid2b}/comments`, JSON.stringify({ content: "被举报的评论" }));
+  const rcid = r.json.comment?.id;
+  r = await req("POST", "/api/reports", JSON.stringify({ comment_id: rcid, reason: "霸凌骚扰" }));
+  check("report-comment-create", r.status === 201);
+  cookie = cookieA2;
+  r = await req("POST", "/api/admin/reports/handle", JSON.stringify({ comment_id: rcid, action: "remove" }));
+  check("report-comment-remove", r.status === 200);
+  r = await req("GET", `/api/artworks/${aid2b}/comments`);
+  check("report-comment-gone", r.json.items.every((x) => x.id !== rcid));
+
+  // ---- 用户封禁 / 审计日志 / 待办统计 ----
+  r = await req("GET", "/api/admin/users?q=小黑");
+  check("admin-users-search", r.status === 200 && r.json.items.some((x) => x.id === bid && x.banned === 0));
+  r = await req("PATCH", `/api/admin/users/${bid}`, JSON.stringify({ banned: 1 }));
+  check("admin-ban", r.status === 200);
+  r = await req("GET", "/api/admin/users?status=banned");
+  check("admin-users-banned-filter", r.status === 200 && r.json.items.some((x) => x.id === bid && x.banned === 1) && r.json.items.every((x) => x.banned === 1));
+  r = await req("GET", "/api/admin/users?status=normal");
+  check("admin-users-normal-filter", r.status === 200 && !r.json.items.some((x) => x.id === bid) && r.json.items.every((x) => x.banned === 0));
+  cookie = "";
+  r = await req("POST", "/api/login", JSON.stringify({ email: "b@c.cn", password: "secret12" }));
+  check("banned-login", r.status === 403 && r.json.error === "account_banned");
+  cookie = cookieA2;
+  r = await req("PATCH", `/api/admin/users/${bid}`, JSON.stringify({ banned: 0 }));
+  check("admin-unban", r.status === 200);
+  r = await req("PATCH", `/api/admin/users/${meId}`, JSON.stringify({ banned: 1 }));
+  check("admin-ban-self", r.status === 400);
+  r = await req("GET", "/api/admin/logs");
+  check("admin-logs", r.status === 200 && r.json.items.some((x) => x.action === "user_ban") && r.json.items.some((x) => x.action === "user_unban"));
+  r = await req("GET", "/api/admin/logs?status=user");
+  check("admin-logs-user-filter", r.status === 200 && r.json.items.length > 0 && r.json.items.every((x) => x.action.startsWith("user_")));
+  r = await req("GET", "/api/admin/logs?q=user_ban");
+  check("admin-logs-search", r.status === 200 && r.json.items.some((x) => x.action === "user_ban") && r.json.items.every((x) => `${x.action} ${x.detail || ""} ${x.admin_name}`.includes("user_ban")));
+  r = await req("GET", "/api/admin/stats");
+  check("admin-stats-todo", r.status === 200 && typeof r.json.stats.pending_count === "number" && typeof r.json.stats.open_reports_count === "number" && r.json.stats.users_total >= 2);
 
   // 登出后 me 失效
   r = await req("POST", "/api/logout");

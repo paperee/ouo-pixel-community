@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS artworks (
   comments_count INTEGER NOT NULL DEFAULT 0,
   views INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'pending',
+  removed_source TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -120,6 +121,17 @@ CREATE TABLE IF NOT EXISTS events (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_events_name_time ON events(name, created_at);
+
+-- 管理操作审计：谁、对什么、做了什么
+CREATE TABLE IF NOT EXISTS admin_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  admin_id INTEGER NOT NULL REFERENCES users(id),
+  action TEXT NOT NULL,
+  target_type TEXT NOT NULL DEFAULT '',
+  target_id INTEGER,
+  detail TEXT DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 -- 高频查询列索引（画廊/评论/草稿/通知/版本全是这些 WHERE/ORDER 列，全表扫描随数据量变慢）
 CREATE INDEX IF NOT EXISTS idx_artworks_status_id ON artworks(status, id DESC);
 CREATE INDEX IF NOT EXISTS idx_comments_artwork ON comments(artwork_id, id);
@@ -147,6 +159,11 @@ for (const sql of [
   "ALTER TABLE users ADD COLUMN pet_artwork_id INTEGER",
   "ALTER TABLE users ADD COLUMN pet_flip INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE users ADD COLUMN pet_kind TEXT NOT NULL DEFAULT 'artwork'",
+  // 封禁：管理员后台可封/解封，requireLogin 统一拦截
+  "ALTER TABLE users ADD COLUMN banned INTEGER NOT NULL DEFAULT 0",
+  // 下架来源：author=作者主动取消发布，admin=管理员/举报处理下架；旧数据按管理员下架兼容
+  "ALTER TABLE artworks ADD COLUMN removed_source TEXT",
+  "UPDATE artworks SET removed_source = 'admin' WHERE status = 'removed' AND removed_source IS NULL",
   // follows / favorites 从未有任何读写（0 行），直接删表
   "DROP TABLE IF EXISTS follows",
   "DROP TABLE IF EXISTS favorites",

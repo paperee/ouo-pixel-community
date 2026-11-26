@@ -65,7 +65,8 @@ function nav(user) {
           user
             ? `<a href="#/me" class="px-btn">${user.nickname}</a>
                <a href="#/drafts" class="px-btn">草稿箱</a>
-               <a href="#/notices" class="px-btn" id="nav-bell">通知</a>`
+               <a href="#/notices" class="px-btn" id="nav-bell">通知</a>
+               ${user.is_admin ? `<a href="#/admin" class="px-btn px-btn--grape">后台</a>` : ""}`
             : `<a href="#/login" class="px-btn">登录</a>
                <a href="#/register" class="px-btn px-btn--cherry">注册</a>`
         }

@@ -1,7 +1,7 @@
 // 社交：点赞 / 评论（含楼中楼一级回复）/ 通知（被赞、被评论、被@）/ 拉黑联动
 import { Router } from "express";
 import { db } from "./db.js";
-import { isAdminEmail, requireLogin } from "./auth.js";
+import { isAdminEmail, isAdminUser, logAdmin, requireAdmin, requireLogin } from "./auth.js";
 import { rateLimit } from "./ratelimit.js";
 
 export const socialRouter = Router();
@@ -11,14 +11,13 @@ socialRouter.get("/board", (req, res) => {
   const row = db.prepare("SELECT content, updated_at FROM board WHERE id = 1").get();
   res.json({ board: { content: row?.content || "", updated_at: row?.updated_at || null } });
 });
-socialRouter.put("/board", requireLogin, (req, res) => {
-  const me = db.prepare("SELECT email FROM users WHERE id = ?").get(req.session.userId);
-  if (!me || !isAdminEmail(me.email)) return res.status(403).json({ error: "forbidden" });
+socialRouter.put("/board", requireLogin, requireAdmin, (req, res) => {
   const content = String(req.body?.content || "").trim().slice(0, 2000);
   db.prepare(
     `INSERT INTO board (id, content, updated_by, updated_at) VALUES (1, ?, ?, datetime('now'))
      ON CONFLICT(id) DO UPDATE SET content = excluded.content, updated_by = excluded.updated_by, updated_at = excluded.updated_at`
   ).run(content, req.session.userId);
+  logAdmin(req.session.userId, "board_update", "board", 1, content.slice(0, 50));
   res.json({ ok: true });
 });
 
@@ -171,6 +170,8 @@ socialRouter.delete("/comments/:id", requireLogin, (req, res) => {
     return res.status(403).json({ error: "forbidden" });
   db.prepare("UPDATE comments SET deleted = 1 WHERE id = ?").run(c.id);
   recountComments(c.artwork_id);
+  if (c.user_id !== req.session.userId && isAdminUser(req.session.userId))
+    logAdmin(req.session.userId, "comment_delete", "comment", c.id, String(c.content).slice(0, 50));
   res.json({ ok: true });
 });
 

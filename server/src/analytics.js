@@ -2,7 +2,7 @@
 // 次日留存 = 昨天注册且今天有 visit 的用户占比。
 import { Router } from "express";
 import { db } from "./db.js";
-import { requireLogin } from "./auth.js";
+import { requireAdmin, requireLogin } from "./auth.js";
 import { rateLimit } from "./ratelimit.js";
 
 export function logEvent(userId, name, meta = "") {
@@ -40,14 +40,14 @@ analyticsRouter.post(
   }
 );
 
-analyticsRouter.get("/admin/stats", requireLogin, (req, res) => {
-  const me = db.prepare("SELECT email FROM users WHERE id = ?").get(req.session.userId);
-  const admins = (process.env.ADMIN_EMAILS || "").split(",").map((s) => s.trim().toLowerCase());
-  if (!me || !admins.includes(me.email.toLowerCase()))
-    return res.status(403).json({ error: "forbidden" });
+analyticsRouter.get("/admin/stats", requireLogin, requireAdmin, (req, res) => {
   const q = (sql, ...a) => db.prepare(sql).get(...a);
   const since = (d) => `datetime('now', '-${d} days')`;
   const stats = {
+    // 待办指标：今天该干什么
+    pending_count: q("SELECT COUNT(*) c FROM artworks WHERE status = 'pending'").c,
+    open_reports_count: q("SELECT COUNT(*) c FROM reports WHERE status = 'open'").c,
+    users_total: q("SELECT COUNT(*) c FROM users").c,
     registrations_7d: q(`SELECT COUNT(*) c FROM users WHERE created_at > ${since(7)}`).c,
     visits_7d: q(`SELECT COUNT(*) c FROM events WHERE name = 'visit' AND created_at > ${since(7)}`).c,
     savers_7d: q(`SELECT COUNT(DISTINCT user_id) c FROM events WHERE name = 'save' AND user_id IS NOT NULL AND created_at > ${since(7)}`).c,

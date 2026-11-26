@@ -3,7 +3,7 @@
 import { Router } from "express";
 import { db } from "./db.js";
 import { draftPixels, pixelsToPng } from "./draft-image.js";
-import { isAdminEmail, requireLogin } from "./auth.js";
+import { isAdminEmail, isAdminUser, logAdmin, requireAdmin, requireLogin } from "./auth.js";
 import { rateLimit } from "./ratelimit.js";
 
 export const artworksRouter = Router();
@@ -188,7 +188,8 @@ artworksRouter.get("/artworks/:id", (req, res) => {
     .get(id);
   if (!row) return res.status(404).json({ error: "no_such_artwork" });
   const isAuthor = req.session.userId === row.author_id;
-  if ((row.status === "pending" || row.status === "removed") && !isAuthor)
+  // 待审/下架的作品只有作者和管理员能看（管理员审核需要看大图和图层）
+  if ((row.status === "pending" || row.status === "removed") && !isAuthor && !isAdminUser(req.session.userId))
     return res.status(404).json({ error: "no_such_artwork" });
   if (row.status === "normal" || row.status === "featured") {
     req.session.viewed = req.session.viewed || [];
@@ -241,7 +242,7 @@ artworksRouter.post("/artworks/:id/unpublish", requireLogin, (req, res) => {
   if (!a) return res.status(404).json({ error: "no_such_artwork" });
   if (a.author_id !== req.session.userId) return res.status(403).json({ error: "forbidden" });
   if (a.status === "removed") return res.status(409).json({ error: "already_removed" });
-  db.prepare("UPDATE artworks SET status = 'removed' WHERE id = ?").run(Number(req.params.id));
+  db.prepare("UPDATE artworks SET status = 'removed', removed_source = 'author' WHERE id = ?").run(Number(req.params.id));
   res.json({ ok: true, avatar_cleared: clearAvatarIfFrom(a.author_id, a.png_url) });
 });
 
@@ -283,10 +284,26 @@ artworksRouter.patch("/artworks/:id", requireLogin, (req, res) => {
     patch.allow_remix = rm;
   }
   if (!Object.keys(patch).length) return res.status(400).json({ error: "bad_request" });
+  const aid = Number(req.params.id);
+  // 防绕审：标题/简介变更后重跑机审，命中即打回待审（发布审一次，编辑不能成为后门）
+  let reReview = false;
+  if (patch.title !== undefined || patch.description !== undefined) {
+    const cur = db.prepare("SELECT title, description, status FROM artworks WHERE id = ?").get(aid);
+    if (cur && cur.status !== "pending" && hitSensitive(patch.title ?? cur.title, patch.description ?? cur.description)) {
+      patch.status = "pending";
+      reReview = true;
+    }
+  }
   const sets = Object.keys(patch)
     .map((k) => `${k} = ?`)
     .join(", ");
-  db.prepare(`UPDATE artworks SET ${sets} WHERE id = ?`).run(...Object.values(patch), Number(req.params.id));
+  db.prepare(`UPDATE artworks SET ${sets} WHERE id = ?`).run(...Object.values(patch), aid);
+  if (reReview) {
+    const title = patch.title ?? db.prepare("SELECT title FROM artworks WHERE id = ?").get(aid).title;
+    db.prepare(
+      "INSERT INTO notifications (user_id, type, ref_id, extra) VALUES (?, 'system', ?, ?)"
+    ).run(req.session.userId, aid, `你的作品《${String(title).slice(0, 40)}》修改后命中审核关键词，已转入待审，通过后会重新公开`);
+  }
   res.json({ ok: true, ...patch });
 });
 
@@ -355,47 +372,68 @@ artworksRouter.get("/me/works", requireLogin, (req, res) => {
   res.json({ items, drafts: draftItems });
 });
 
-// ---- 审核（T55）：邮箱白名单管理员（懒加载，方便自测时注入）----
-function requireAdmin(req, res, next) {
-  const me = db.prepare("SELECT email FROM users WHERE id = ?").get(req.session.userId);
-  if (!me || !isAdminEmail(me.email))
-    return res.status(403).json({ error: "forbidden" });
-  next();
-}
+// ---- 审核（T55）：管理员门禁统一走 auth.js 的 requireAdmin ----
 
+// 后台作品列表：缩略图（thumb_url 别名为 png_url，前端行内 img 无需区分）+ 服务端分页
+// status 筛选：featured / normal / removed 各自独立，all=全部（默认，按精选>正常>下架排序）
 artworksRouter.get("/admin/artworks", requireLogin, requireAdmin, (req, res) => {
   const q = String(req.query.q || "").trim().slice(0, 40);
   const like = `%${q}%`;
+  const st = ["featured", "normal", "removed", "all"].includes(req.query.status) ? req.query.status : "all";
+  const statusWhere =
+    st === "all" ? "a.status IN ('normal', 'featured', 'removed')" : `a.status = '${st}'`;
+  const limit = Math.min(48, Math.max(1, Number(req.query.limit) || 12));
+  const where = `${statusWhere} AND (? = '' OR a.title LIKE ? OR u.nickname LIKE ?)`;
+  const total = db
+    .prepare(`SELECT COUNT(*) c FROM artworks a JOIN users u ON u.id = a.author_id WHERE ${where}`)
+    .get(q, like, like).c;
+  const pages = Math.max(1, Math.ceil(total / limit));
+  const page = Math.min(Math.max(1, Number(req.query.page) || 1), pages);
   const items = db
     .prepare(
-      `SELECT a.id, a.title, a.png_url, a.status, a.created_at, u.nickname AS author_name
+      `SELECT a.id, a.title, a.thumb_url AS png_url, a.status, a.removed_source, a.created_at, u.nickname AS author_name
        FROM artworks a JOIN users u ON u.id = a.author_id
-       WHERE a.status IN ('normal', 'featured')
-         AND (? = '' OR a.title LIKE ? OR u.nickname LIKE ?)
-       ORDER BY CASE a.status WHEN 'featured' THEN 0 ELSE 1 END, a.id DESC`
+       WHERE ${where}
+       ORDER BY CASE a.status WHEN 'featured' THEN 0 WHEN 'removed' THEN 1 ELSE 2 END, a.id DESC
+       LIMIT ? OFFSET ?`
     )
-    .all(q, like, like);
-  res.json({ items, q });
+    .all(q, like, like, limit, (page - 1) * limit);
+  res.json({ items, q, status: st, page, pages, total });
 });
 
 artworksRouter.get("/admin/pending", requireLogin, requireAdmin, (req, res) => {
+  const limit = Math.min(48, Math.max(1, Number(req.query.limit) || 12));
+  const total = db.prepare("SELECT COUNT(*) c FROM artworks WHERE status = 'pending'").get().c;
+  const pages = Math.max(1, Math.ceil(total / limit));
+  const page = Math.min(Math.max(1, Number(req.query.page) || 1), pages);
+  // 顺带带出该作品的未处理举报：次数 + 举报人（昵称#ID），审核时一眼看到民怨
   const items = db
     .prepare(
-      `SELECT a.id, a.title, a.description, a.png_url, a.created_at, u.nickname AS author_name
+      `SELECT a.id, a.title, a.description, a.thumb_url AS png_url, a.created_at, u.nickname AS author_name,
+        (SELECT COUNT(*) FROM reports r WHERE r.artwork_id = a.id AND r.status = 'open') AS report_count,
+        (SELECT GROUP_CONCAT(ru.nickname || '#' || r.reporter_id, '、')
+           FROM reports r JOIN users ru ON ru.id = r.reporter_id
+           WHERE r.artwork_id = a.id AND r.status = 'open') AS reporters
        FROM artworks a JOIN users u ON u.id = a.author_id
-       WHERE a.status = 'pending' ORDER BY a.id DESC`
+       WHERE a.status = 'pending' ORDER BY a.id DESC LIMIT ? OFFSET ?`
     )
-    .all();
-  res.json({ items });
+    .all(limit, (page - 1) * limit);
+  res.json({ items, page, pages, total });
 });
 
+// 审核操作：通过 / 精选 / 下架（可附理由，随通知告知作者）
 artworksRouter.patch("/admin/:id", requireLogin, requireAdmin, (req, res) => {
   const { status } = req.body || {};
+  const reason = String(req.body?.reason || "").trim().slice(0, 200);
   if (!["normal", "featured", "removed"].includes(status))
     return res.status(400).json({ error: "bad_status" });
-  const before = db.prepare("SELECT author_id, status, title, png_url FROM artworks WHERE id = ?").get(Number(req.params.id));
+  const id = Number(req.params.id);
+  const before = db.prepare("SELECT author_id, status, removed_source, title, png_url FROM artworks WHERE id = ?").get(id);
   if (!before) return res.status(404).json({ error: "no_such_artwork" });
-  db.prepare("UPDATE artworks SET status = ? WHERE id = ?").run(status, Number(req.params.id));
+  if (before.status === "removed" && before.removed_source === "author")
+    return res.status(403).json({ error: "author_removed" });
+  db.prepare("UPDATE artworks SET status = ?, removed_source = ? WHERE id = ?")
+    .run(status, status === "removed" ? "admin" : null, id);
   // 管理员下架同样联动头像：头像来源被端掉就恢复默认“画”
   if (status === "removed") clearAvatarIfFrom(before.author_id, before.png_url);
   // 审核结果通知作者：通过 / 精选 / 下架（状态真变了才打扰）
@@ -405,8 +443,194 @@ artworksRouter.patch("/admin/:id", requireLogin, requireAdmin, (req, res) => {
     if (type !== "approved" || before.status === "pending") {
       db.prepare(
         "INSERT INTO notifications (user_id, type, ref_id, extra) VALUES (?, ?, ?, ?)"
-      ).run(before.author_id, type, Number(req.params.id), before.title);
+      ).run(before.author_id, type, id, before.title);
+      // 下架理由单独一条系统通知，作者不再莫名其妙
+      if (status === "removed" && reason) {
+        db.prepare(
+          "INSERT INTO notifications (user_id, type, ref_id, extra) VALUES (?, 'system', ?, ?)"
+        ).run(before.author_id, id, `你的作品《${String(before.title).slice(0, 40)}》被下架，原因：${reason}`);
+      }
     }
   }
+  logAdmin(req.session.userId, `artwork_${status}`, "artwork", id,
+    `${before.title}${reason ? `｜理由：${reason}` : ""}`);
   res.json({ ok: true });
+});
+
+// ---- 举报处理：同目标的多条举报聚合为一行，处理一次全部结单 ----
+artworksRouter.get("/admin/reports", requireLogin, requireAdmin, (req, res) => {
+  const st = ["open", "handled", "all"].includes(req.query.status) ? req.query.status : "open";
+  const where =
+    st === "all" ? "1=1" : st === "open" ? "r.status = 'open'" : "r.status != 'open'";
+  const limit = 8;
+  const total = db
+    .prepare(
+      `SELECT COUNT(*) c FROM (SELECT 1 FROM reports r WHERE ${where}
+       GROUP BY COALESCE(r.artwork_id, 0), COALESCE(r.comment_id, 0))`
+    )
+    .get().c;
+  const pages = Math.max(1, Math.ceil(total / limit));
+  const page = Math.min(Math.max(1, Number(req.query.page) || 1), pages);
+  const items = db
+    .prepare(
+      `SELECT COALESCE(r.artwork_id, 0) AS artwork_id, COALESCE(r.comment_id, 0) AS comment_id,
+        COUNT(*) AS cnt, MAX(r.created_at) AS latest,
+        GROUP_CONCAT(DISTINCT r.reason) AS reasons, MAX(r.status) AS status,
+        GROUP_CONCAT(DISTINCT ru.nickname || '#' || r.reporter_id) AS reporters,
+        a.title AS artwork_title, a.thumb_url AS artwork_thumb, a.status AS artwork_status,
+        au.nickname AS artwork_author,
+        c.content AS comment_content, c.deleted AS comment_deleted, c.artwork_id AS comment_artwork_id,
+        cu.nickname AS comment_author
+       FROM reports r
+       JOIN users ru ON ru.id = r.reporter_id
+       LEFT JOIN artworks a ON a.id = r.artwork_id
+       LEFT JOIN users au ON au.id = a.author_id
+       LEFT JOIN comments c ON c.id = r.comment_id
+       LEFT JOIN users cu ON cu.id = c.user_id
+       WHERE ${where}
+       GROUP BY COALESCE(r.artwork_id, 0), COALESCE(r.comment_id, 0)
+       ORDER BY latest DESC LIMIT ? OFFSET ?`
+    )
+    .all(limit, (page - 1) * limit);
+  const open = db
+    .prepare(
+      `SELECT COUNT(*) c FROM (SELECT 1 FROM reports WHERE status = 'open'
+       GROUP BY COALESCE(artwork_id, 0), COALESCE(comment_id, 0))`
+    )
+    .get().c;
+  res.json({ items, page, pages, total, open });
+});
+
+// 处理举报：remove=下架作品/删除评论并结单，dismiss=驳回；举报人都会收到反馈
+artworksRouter.post("/admin/reports/handle", requireLogin, requireAdmin, (req, res) => {
+  const action = req.body?.action;
+  if (!["dismiss", "remove"].includes(action))
+    return res.status(400).json({ error: "bad_action" });
+  const aid = Number(req.body?.artwork_id) || 0;
+  const cid = Number(req.body?.comment_id) || 0;
+  if (!aid && !cid) return res.status(400).json({ error: "bad_target" });
+  const open = db
+    .prepare(
+      `SELECT id, reporter_id FROM reports WHERE status = 'open'
+       AND COALESCE(artwork_id, 0) = ? AND COALESCE(comment_id, 0) = ?`
+    )
+    .all(aid, cid);
+  if (!open.length) return res.status(404).json({ error: "no_open_report" });
+  let detail = "";
+  if (action === "remove") {
+    if (aid) {
+      const art = db.prepare("SELECT author_id, title, png_url, status FROM artworks WHERE id = ?").get(aid);
+      if (art && art.status !== "removed") {
+        db.prepare("UPDATE artworks SET status = 'removed', removed_source = 'admin' WHERE id = ?").run(aid);
+        clearAvatarIfFrom(art.author_id, art.png_url);
+        db.prepare(
+          "INSERT INTO notifications (user_id, type, ref_id, extra) VALUES (?, 'removed', ?, ?)"
+        ).run(art.author_id, aid, art.title);
+        detail = `作品《${art.title}》`;
+      }
+    }
+    if (cid) {
+      const c = db.prepare("SELECT artwork_id, user_id, content FROM comments WHERE id = ? AND deleted = 0").get(cid);
+      if (c) {
+        db.prepare("UPDATE comments SET deleted = 1 WHERE id = ?").run(cid);
+        db.prepare(
+          "UPDATE artworks SET comments_count = (SELECT COUNT(*) FROM comments WHERE artwork_id = ? AND deleted = 0) WHERE id = ?"
+        ).run(c.artwork_id, c.artwork_id);
+        db.prepare(
+          "INSERT INTO notifications (user_id, type, ref_id, extra) VALUES (?, 'system', ?, ?)"
+        ).run(c.user_id, c.artwork_id, "你的一条评论因被举报违反社区规范，已被删除");
+        detail = detail || `评论「${String(c.content).slice(0, 20)}」`;
+      }
+    }
+  }
+  db.prepare(
+    `UPDATE reports SET status = ? WHERE status = 'open'
+     AND COALESCE(artwork_id, 0) = ? AND COALESCE(comment_id, 0) = ?`
+  ).run(action === "remove" ? "resolved" : "dismissed", aid, cid);
+  // 举报不再是黑洞：处理结果反馈给每一位举报人
+  const note = action === "remove"
+    ? "你举报的内容已处理（下架/删除），感谢守护社区"
+    : "你举报的内容经审核暂未违规，感谢反馈";
+  for (const rep of open) {
+    db.prepare(
+      "INSERT INTO notifications (user_id, type, ref_id, extra) VALUES (?, 'system', ?, ?)"
+    ).run(rep.reporter_id, aid || null, note);
+  }
+  logAdmin(req.session.userId, `report_${action}`, aid ? "artwork" : "comment", aid || cid, detail);
+  res.json({ ok: true });
+});
+
+// ---- 用户管理：搜索 + 封禁/解封（不能封自己，也不能封管理员）；每页 8 条 ----
+artworksRouter.get("/admin/users", requireLogin, requireAdmin, (req, res) => {
+  const q = String(req.query.q || "").trim().slice(0, 40);
+  const like = `%${q}%`;
+  const limit = 8;
+  const st = ["all", "normal", "banned"].includes(req.query.status) ? req.query.status : "all";
+  const statusWhere = st === "all" ? "1=1" : st === "banned" ? "u.banned = 1" : "u.banned = 0";
+  const where = `${statusWhere} AND (? = '' OR u.nickname LIKE ? OR u.email LIKE ?)`;
+  const total = db.prepare(`SELECT COUNT(*) c FROM users u WHERE ${where}`).get(q, like, like).c;
+  const pages = Math.max(1, Math.ceil(total / limit));
+  const page = Math.min(Math.max(1, Number(req.query.page) || 1), pages);
+  const items = db
+    .prepare(
+      `SELECT u.id, u.nickname, u.email, u.banned, u.created_at,
+        (SELECT COUNT(*) FROM artworks a WHERE a.author_id = u.id) AS artworks_count
+       FROM users u
+       WHERE ${where}
+       ORDER BY u.banned DESC, u.id DESC LIMIT ? OFFSET ?`
+    )
+    .all(q, like, like, limit, (page - 1) * limit);
+  for (const u of items) u.is_admin = isAdminEmail(u.email);
+  res.json({ items, q, status: st, page, pages, total });
+});
+
+artworksRouter.get("/admin/admins", requireLogin, requireAdmin, (req, res) => {
+  const items = db
+    .prepare("SELECT id, nickname, email, created_at FROM users ORDER BY id ASC")
+    .all()
+    .filter((u) => isAdminEmail(u.email));
+  res.json({ items });
+});
+
+artworksRouter.patch("/admin/users/:id", requireLogin, requireAdmin, (req, res) => {
+  const uid = Number(req.params.id);
+  const banned = req.body?.banned ? 1 : 0;
+  if (uid === req.session.userId) return res.status(400).json({ error: "cannot_ban_self" });
+  const u = db.prepare("SELECT id, nickname, email FROM users WHERE id = ?").get(uid);
+  if (!u) return res.status(404).json({ error: "no_such_user" });
+  if (isAdminEmail(u.email)) return res.status(400).json({ error: "cannot_ban_admin" });
+  db.prepare("UPDATE users SET banned = ? WHERE id = ?").run(banned, uid);
+  logAdmin(req.session.userId, banned ? "user_ban" : "user_unban", "user", uid, u.nickname);
+  res.json({ ok: true, banned });
+});
+
+// ---- 审计日志：只保留最近 40 条可查，每页 8 条 ----
+artworksRouter.get("/admin/logs", requireLogin, requireAdmin, (req, res) => {
+  const limit = 8;
+  const q = String(req.query.q || "").trim().slice(0, 40);
+  const like = `%${q}%`;
+  const st = ["all", "artwork", "user", "report", "other"].includes(req.query.status) ? req.query.status : "all";
+  const categoryWhere =
+    st === "all" ? "1=1"
+      : st === "artwork" ? "l.action LIKE 'artwork_%'"
+        : st === "user" ? "l.action LIKE 'user_%'"
+          : st === "report" ? "l.action LIKE 'report_%'"
+            : "l.action NOT LIKE 'artwork_%' AND l.action NOT LIKE 'user_%' AND l.action NOT LIKE 'report_%'";
+  const searchWhere = "(? = '' OR l.action LIKE ? OR l.detail LIKE ? OR u.nickname LIKE ? OR CAST(l.target_id AS TEXT) LIKE ?)";
+  const recentCte = "WITH recent AS (SELECT * FROM admin_logs ORDER BY id DESC LIMIT 40)";
+  const fromWhere = `FROM recent l JOIN users u ON u.id = l.admin_id
+    WHERE ${categoryWhere} AND ${searchWhere}`;
+  const total = db.prepare(`${recentCte} SELECT COUNT(*) c ${fromWhere}`).get(q, like, like, like, like).c;
+  const pages = Math.max(1, Math.ceil(total / limit));
+  const page = Math.min(Math.max(1, Number(req.query.page) || 1), pages);
+  const items = db
+    .prepare(
+      `${recentCte}
+       SELECT l.id, l.action, l.target_type, l.target_id, l.detail, l.created_at,
+        u.nickname AS admin_name
+       ${fromWhere}
+       ORDER BY l.id DESC LIMIT ? OFFSET ?`
+    )
+    .all(q, like, like, like, like, limit, (page - 1) * limit);
+  res.json({ items, q, status: st, page, pages, total });
 });

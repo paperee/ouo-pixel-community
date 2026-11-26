@@ -19,10 +19,10 @@ export async function mountArt(id, user) {
   const mine = !!r.data.mine;
   const showDl = canDl || mine;
   const showRemix = canRemix || mine;
-        // <div class="row">
-        //   ${a.status === "pending" && mine ? `<span class="px-badge" style="background:var(--sky);color:#fff">待审核</span>` : ""}
-        //   ${a.status === "featured" ? `<span class="px-badge" style="background:var(--sky);color:#fff">精选</span>` : ""}
-        // </div>
+  const statusBadge =
+    a.status === "pending" ? `<span class="px-badge" style="background:var(--sky);color:#fff">待审核</span>`
+    : a.status === "removed" ? `<span class="px-badge" style="background:var(--cherry,#d33);color:#fff">已下架</span>`
+    : "";
   root.innerHTML = `
     <div class="row" style="margin-bottom:12px;justify-content:space-between;align-items:center"><button class="px-btn px-btn--sm" id="art-back">← 返回</button><span class="row" style="gap:8px"><button class="px-btn px-btn--sm" id="art-prev" disabled>← 上一张</button><button class="px-btn px-btn--sm" id="art-next" disabled>下一张 →</button></span></div>
     <div class="art-detail px-card">
@@ -33,6 +33,7 @@ export async function mountArt(id, user) {
       <div class="stack">
         <h1 class="px-title ellipsis-1" style="margin:0" title="${esc(a.title)}">${esc(a.title)}</h1>
         <div class="row">
+          ${statusBadge}
           ${permBadges(a).map((b) => `<span class="px-badge">${esc(b)}</span>`).join("")}
           <span class="px-badge">${a.width}×${a.height}</span>
           <span class="px-badge">${a.layers_count || 1} 层</span>

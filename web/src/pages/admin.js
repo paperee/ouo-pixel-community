@@ -221,7 +221,7 @@ function wireRemovedThumbPreview(root) {
     const thumb = e.target.closest("[data-removed-thumb]");
     if (!thumb || !root.contains(thumb) || e.button !== 0) return;
     clear();
-    active = thumb.closest(".admin-row--removed");
+    active = thumb.closest(".admin-row--removed, .admin-row--author-removed");
     startX = e.clientX;
     startY = e.clientY;
     timer = setTimeout(() => {
@@ -278,7 +278,7 @@ function artworkRow(a) {
   const removed = a.status === "removed";
   const authorRemoved = removed && a.removed_source === "author";
   return `
-    <div class="px-card draft-row${featured ? " admin-row--featured" : removed ? " admin-row--removed" : ""}" data-id="${a.id}">
+    <div class="px-card draft-row${featured ? " admin-row--featured" : authorRemoved ? " admin-row--author-removed" : removed ? " admin-row--removed" : ""}" data-id="${a.id}">
       ${removed
         ? `<span class="admin-thumb admin-thumb--removed" data-removed-thumb title="长按查看已下架作品缩略图">
              <img class="draft-thumb" src="${a.png_url}" alt="已下架作品缩略图" draggable="false">
@@ -289,6 +289,7 @@ function artworkRow(a) {
         <b>${esc(a.title)}</b>
         <p class="hint">${esc(a.author_name)} · ${esc(a.created_at)}</p>
         ${authorRemoved ? `<p class="hint">作者主动下架，管理员不可操作</p>` : ""}
+        ${removed && !authorRemoved && a.removed_reason ? `<p class="hint">下架理由：${esc(a.removed_reason)}</p>` : ""}
       </div>
       <div class="row admin-row-ops">
         <a class="px-btn px-btn--sm" href="#/art/${a.id}">查看</a>

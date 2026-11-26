@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS artworks (
   views INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'pending',
   removed_source TEXT,
+  removed_reason TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -163,6 +164,7 @@ for (const sql of [
   "ALTER TABLE users ADD COLUMN banned INTEGER NOT NULL DEFAULT 0",
   // 下架来源：author=作者主动取消发布，admin=管理员/举报处理下架；旧数据按管理员下架兼容
   "ALTER TABLE artworks ADD COLUMN removed_source TEXT",
+  "ALTER TABLE artworks ADD COLUMN removed_reason TEXT",
   "UPDATE artworks SET removed_source = 'admin' WHERE status = 'removed' AND removed_source IS NULL",
   // follows / favorites 从未有任何读写（0 行），直接删表
   "DROP TABLE IF EXISTS follows",

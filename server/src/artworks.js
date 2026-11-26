@@ -242,7 +242,7 @@ artworksRouter.post("/artworks/:id/unpublish", requireLogin, (req, res) => {
   if (!a) return res.status(404).json({ error: "no_such_artwork" });
   if (a.author_id !== req.session.userId) return res.status(403).json({ error: "forbidden" });
   if (a.status === "removed") return res.status(409).json({ error: "already_removed" });
-  db.prepare("UPDATE artworks SET status = 'removed', removed_source = 'author' WHERE id = ?").run(Number(req.params.id));
+  db.prepare("UPDATE artworks SET status = 'removed', removed_source = 'author', removed_reason = NULL WHERE id = ?").run(Number(req.params.id));
   res.json({ ok: true, avatar_cleared: clearAvatarIfFrom(a.author_id, a.png_url) });
 });
 
@@ -375,7 +375,7 @@ artworksRouter.get("/me/works", requireLogin, (req, res) => {
 // ---- 审核（T55）：管理员门禁统一走 auth.js 的 requireAdmin ----
 
 // 后台作品列表：缩略图（thumb_url 别名为 png_url，前端行内 img 无需区分）+ 服务端分页
-// status 筛选：featured / normal / removed 各自独立，all=全部（默认，按精选>正常>下架排序）
+// status 筛选：featured / normal / removed 各自独立，all=全部（默认，按发布时间倒序）
 artworksRouter.get("/admin/artworks", requireLogin, requireAdmin, (req, res) => {
   const q = String(req.query.q || "").trim().slice(0, 40);
   const like = `%${q}%`;
@@ -391,10 +391,10 @@ artworksRouter.get("/admin/artworks", requireLogin, requireAdmin, (req, res) => 
   const page = Math.min(Math.max(1, Number(req.query.page) || 1), pages);
   const items = db
     .prepare(
-      `SELECT a.id, a.title, a.thumb_url AS png_url, a.status, a.removed_source, a.created_at, u.nickname AS author_name
+      `SELECT a.id, a.title, a.thumb_url AS png_url, a.status, a.removed_source, a.removed_reason, a.created_at, u.nickname AS author_name
        FROM artworks a JOIN users u ON u.id = a.author_id
        WHERE ${where}
-       ORDER BY CASE a.status WHEN 'featured' THEN 0 WHEN 'removed' THEN 1 ELSE 2 END, a.id DESC
+       ORDER BY a.created_at DESC, a.id DESC
        LIMIT ? OFFSET ?`
     )
     .all(q, like, like, limit, (page - 1) * limit);
@@ -432,8 +432,8 @@ artworksRouter.patch("/admin/:id", requireLogin, requireAdmin, (req, res) => {
   if (!before) return res.status(404).json({ error: "no_such_artwork" });
   if (before.status === "removed" && before.removed_source === "author")
     return res.status(403).json({ error: "author_removed" });
-  db.prepare("UPDATE artworks SET status = ?, removed_source = ? WHERE id = ?")
-    .run(status, status === "removed" ? "admin" : null, id);
+  db.prepare("UPDATE artworks SET status = ?, removed_source = ?, removed_reason = ? WHERE id = ?")
+    .run(status, status === "removed" ? "admin" : null, status === "removed" ? (reason || null) : null, id);
   // 管理员下架同样联动头像：头像来源被端掉就恢复默认“画”
   if (status === "removed") clearAvatarIfFrom(before.author_id, before.png_url);
   // 审核结果通知作者：通过 / 精选 / 下架（状态真变了才打扰）
@@ -521,7 +521,7 @@ artworksRouter.post("/admin/reports/handle", requireLogin, requireAdmin, (req, r
     if (aid) {
       const art = db.prepare("SELECT author_id, title, png_url, status FROM artworks WHERE id = ?").get(aid);
       if (art && art.status !== "removed") {
-        db.prepare("UPDATE artworks SET status = 'removed', removed_source = 'admin' WHERE id = ?").run(aid);
+        db.prepare("UPDATE artworks SET status = 'removed', removed_source = 'admin', removed_reason = NULL WHERE id = ?").run(aid);
         clearAvatarIfFrom(art.author_id, art.png_url);
         db.prepare(
           "INSERT INTO notifications (user_id, type, ref_id, extra) VALUES (?, 'removed', ?, ?)"
@@ -577,7 +577,7 @@ artworksRouter.get("/admin/users", requireLogin, requireAdmin, (req, res) => {
         (SELECT COUNT(*) FROM artworks a WHERE a.author_id = u.id) AS artworks_count
        FROM users u
        WHERE ${where}
-       ORDER BY u.banned DESC, u.id DESC LIMIT ? OFFSET ?`
+       ORDER BY u.created_at DESC, u.id DESC LIMIT ? OFFSET ?`
     )
     .all(q, like, like, limit, (page - 1) * limit);
   for (const u of items) u.is_admin = isAdminEmail(u.email);

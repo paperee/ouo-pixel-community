@@ -303,8 +303,11 @@ const server = app.listen(0, async () => {
   // 管理员下架头像来源作品 → 头像恢复默认“画”
   r = await req("POST", "/api/me/avatar", JSON.stringify({ artwork_id: pid }));
   check("avatar-set-pid", r.status === 200);
-  r = await req("PATCH", `/api/admin/${pid}`, JSON.stringify({ status: "removed" }));
+  r = await req("PATCH", `/api/admin/${pid}`, JSON.stringify({ status: "removed", reason: "测试下架理由" }));
   check("admin-remove", r.status === 200);
+  r = await req("GET", "/api/admin/artworks?status=removed");
+  check("admin-removed-reason", r.status === 200 &&
+    r.json.items.find((x) => x.id === pid)?.removed_reason === "测试下架理由");
   r = await req("GET", "/api/me");
   check("avatar-reverted-admin", r.status === 200 && !r.json.user.avatar_url);
   r = await req("GET", "/api/me");
@@ -388,6 +391,10 @@ const server = app.listen(0, async () => {
   r = await pub({ draft_id: did, title: "改后重发", png: png4, thumb: png4 });
   check("publish-after-edit", r.status === 201);
   const aid2b = r.json.artwork?.id;
+  r = await req("GET", "/api/admin/artworks");
+  const adminArtworkIds = r.json.items.map((x) => x.id);
+  check("admin-artworks-time-order", r.status === 200 && adminArtworkIds[0] === aid2b &&
+    adminArtworkIds.every((id, i) => i === 0 || adminArtworkIds[i - 1] > id));
   const gNew = (await req("GET", "/api/gallery?tab=new&limit=24")).json.items.map((x) => x.id);
   const gFeat = (await req("GET", "/api/gallery?tab=featured&limit=24")).json.items.map((x) => x.id);
   const all = [...gNew, ...gFeat].sort((x, y) => y - x);
@@ -720,6 +727,9 @@ const server = app.listen(0, async () => {
   check("admin-removed-list", r.status === 200 && r.json.items.some((x) => x.id === aid));
   r = await req("PATCH", `/api/admin/${aid}`, JSON.stringify({ status: "normal" }));
   check("admin-restore", r.status === 200);
+  r = await req("GET", "/api/admin/artworks?status=normal");
+  check("admin-restore-clears-reason", r.status === 200 &&
+    r.json.items.find((x) => x.id === aid)?.removed_reason == null);
   // 评论举报：删除评论并结单（用 aid2b，aid 的评论接口在本进程内已触发限流）
   cookie = "";
   r = await req("POST", "/api/login", JSON.stringify({ email: "b@c.cn", password: "secret12" }));
@@ -734,10 +744,19 @@ const server = app.listen(0, async () => {
   check("report-comment-gone", r.json.items.every((x) => x.id !== rcid));
 
   // ---- 用户封禁 / 审计日志 / 待办统计 ----
+  cookie = "";
+  r = await req("POST", "/api/register", JSON.stringify({ email: "c@e.cn", password: "secret12", nickname: "小绿" }));
+  const userCId = r.json.user?.id;
+  check("register-c", r.status === 201 && userCId);
+  cookie = cookieA2;
   r = await req("GET", "/api/admin/users?q=小黑");
   check("admin-users-search", r.status === 200 && r.json.items.some((x) => x.id === bid && x.banned === 0));
   r = await req("PATCH", `/api/admin/users/${bid}`, JSON.stringify({ banned: 1 }));
   check("admin-ban", r.status === 200);
+  r = await req("GET", "/api/admin/users");
+  const adminUserIds = r.json.items.map((x) => x.id);
+  check("admin-users-time-order", r.status === 200 && adminUserIds[0] === userCId &&
+    adminUserIds.every((id, i) => i === 0 || adminUserIds[i - 1] > id));
   r = await req("GET", "/api/admin/users?status=banned");
   check("admin-users-banned-filter", r.status === 200 && r.json.items.some((x) => x.id === bid && x.banned === 1) && r.json.items.every((x) => x.banned === 1));
   r = await req("GET", "/api/admin/users?status=normal");

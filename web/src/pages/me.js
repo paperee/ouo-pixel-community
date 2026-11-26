@@ -1,6 +1,6 @@
 // 我的主页 + 他人主页：模板 + 资料/头像绑定
 import { api, logout } from "../api.js";
-import { artCard } from "./home.js";
+import { artCard, appendArtCards } from "./home.js";
 import { esc } from "./shared.js";
 import { togglePetFlip } from "./pet.js";
 
@@ -30,17 +30,114 @@ function petRunHtml(pet) {
     + `<div class="pet-facing" data-flip="${pet.flip ? 1 : 0}"><img class="pet-sprite" src="${petImageUrl(pet)}" alt="${esc(pet.title)}" title="${esc(pet.title)}"></div></div>`;
 }
 
-export function pageMe(user, stats, works, myWorks, pet = null) {
+const PROFILE_PAGE_SIZE = 12;
+let profileWallState = null;
+
+function profileWallBox() {
+  return document.querySelector("#profile-works");
+}
+
+function featuredWorks(workPage) {
+  const list = Array.isArray(workPage?.featured)
+    ? workPage.featured
+    : workPage?.master ? [workPage.master] : [];
+  return list.filter((w) => w?.status === "featured");
+}
+
+export function profileFeaturedIds(workPage) {
+  return featuredWorks(workPage).map((w) => w.id);
+}
+
+function nearProfileWallBottom() {
+  return window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 600;
+}
+
+export function mountProfileWall(uid, viewer, workPage, excludeIds = []) {
+  const box = profileWallBox();
+  if (!box) return;
+  const excluded = (Array.isArray(excludeIds) ? excludeIds : [excludeIds]).map(Number).filter(Boolean);
+  profileWallState = {
+    uid: Number(uid),
+    viewer: !!viewer,
+    page: Number(workPage?.page) || 1,
+    hasMore: !!workPage?.has_more,
+    loading: false,
+    excludeIds: new Set(excluded),
+  };
+  const end = document.querySelector("#profile-wall-end");
+  if (end) {
+    end.hidden = profileWallState.hasMore;
+    end.textContent = "到底啦";
+  }
+  if (profileWallState.hasMore) requestAnimationFrame(() => {
+    if (nearProfileWallBottom()) void loadNextProfileWorks();
+  });
+}
+
+async function loadNextProfileWorks() {
+  const state = profileWallState;
+  const box = profileWallBox();
+  if (!state || !box || state.loading || !state.hasMore || box.dataset.uid !== String(state.uid)) return;
+  state.loading = true;
+  const nextPage = state.page + 1;
+  const r = await api("GET", `/api/users/${state.uid}/works?page=${nextPage}&limit=${PROFILE_PAGE_SIZE}`);
+  if (profileWallState !== state || !box.isConnected) return;
+  if (r.status !== 200 || !r.data) {
+    state.loading = false;
+    const end = document.querySelector("#profile-wall-end");
+    if (end) {
+      end.hidden = false;
+      end.textContent = "加载失败，滚动重试";
+    }
+    return;
+  }
+  state.page = Number(r.data.page) || nextPage;
+  state.hasMore = !!r.data.has_more;
+  box.querySelector(":scope > .hint, :scope > .empty-wall")?.remove();
+  const items = (r.data.items || []).filter((a) => !state.excludeIds.has(Number(a.id)));
+  if (items.length) appendArtCards(box, items.map((a) => artCard(a, state.viewer)).join(""));
+  const end = document.querySelector("#profile-wall-end");
+  if (end) {
+    end.hidden = state.hasMore;
+    end.textContent = "到底啦";
+  }
+  state.loading = false;
+  if (state.hasMore) requestAnimationFrame(() => {
+    if (nearProfileWallBottom()) void loadNextProfileWorks();
+  });
+}
+
+export function wireProfileInfinite() {
+  if (window.__pxProfileScroll) return;
+  window.__pxProfileScroll = true;
+  const check = () => {
+    const state = profileWallState;
+    const box = profileWallBox();
+    if (!state || !box || state.loading || !state.hasMore) return;
+    if (box.dataset.uid !== String(state.uid)) return;
+    if (nearProfileWallBottom()) void loadNextProfileWorks();
+  };
+  window.addEventListener("scroll", check, { passive: true });
+  window.addEventListener("resize", check);
+}
+
+export function pageMe(user, stats, workPage, myWorks, pet = null) {
   const avatar = user.avatar_url
     ? `<img class="avatar" src="${user.avatar_url}" alt="头像" />`
     : `<div class="avatar avatar--empty">画</div>`;
   const candidates = (myWorks || []).filter((w) => w.kind === "artwork" && ["normal", "featured"].includes(w.status));
+  const featured = featuredWorks(workPage);
+  const featuredIds = new Set(featured.map((w) => Number(w.id)));
+  const works = (workPage?.items || []).filter((w) => !featuredIds.has(Number(w.id)));
   const avatarGrid = (attr) => candidates.map((w) => {
     const isActive = attr === "avatar"
       ? user.avatar_url === w.png_url
       : petKey(pet) === w.id;
     return `<img class="avatar-pick-item${isActive ? " active" : ""}" ${attr === "avatar" ? `data-avatar="${w.id}"` : `data-pet="${w.id}"`} title="${esc(w.title)}" src="${w.png_url || ""}" alt="${esc(w.title)}" loading="lazy" tabindex="0" role="button">`;
   }).join("");
+  const emptyWall = featured.length
+    ? `<div class="px-card empty-wall">暂无其他作品</div>`
+    : `<div class="px-card empty-wall">还没有作品，去画第一张像素画吧<a href="#/" class="px-btn px-btn--cherry">开始作画</a></div>`;
   return `
     <main class="wrap">
       <h1 class="px-title me-title"><span>我的主页</span>${statChips(user.is_admin)}</h1>
@@ -77,29 +174,32 @@ export function pageMe(user, stats, works, myWorks, pet = null) {
           <button class="px-btn px-btn--sm" id="pet-clear" type="button" ${pet ? "" : "disabled"}>回来吧！</button>
         </div>
       </div>
+      ${featured.length ? `
+      <h2 class="px-title px-title--sub">我的代表作</h2>
+      <div class="art-grid me-wall">${featured.map((a) => artCard(a, true)).join("")}</div>` : ""}
       <h2 class="px-title px-title--sub">我的作品墙</h2>
-      ${works?.length ? `<div class="art-grid me-wall">${works.map(artCard).join("")}</div>` : `
-      <div class="px-card empty-wall">
-        还没有作品，去画第一张像素画吧
-        <a href="#/" class="px-btn px-btn--cherry">开始作画</a>
-      </div>`}
+      ${works.length
+        ? `<div class="art-grid me-wall" id="profile-works" data-uid="${user.id}" data-viewer="1">${works.map((a) => artCard(a, true)).join("")}</div>`
+        : `<div class="art-grid me-wall" id="profile-works" data-uid="${user.id}" data-viewer="1">${workPage?.has_more
+            ? `<p class="hint">读取中…</p>`
+            : emptyWall}</div>`}
+      <p class="hint" id="profile-wall-end"${workPage?.has_more ? " hidden" : ""}>到底啦</p>
     </main>`;
 }
 
-export function pageUser(u, stats, works, pet = null) {
+export function pageUser(u, stats, workPage, pet = null, viewer = false) {
   const avatar = u.avatar_url
     ? `<img class="avatar" src="${u.avatar_url}" alt="头像" />`
     : `<div class="avatar avatar--empty">画</div>`;
-  const list = works || [];
+  const list = workPage?.items || [];
   // 注册天数
   let days = null;
   const t0 = Date.parse(String(u.created_at || "").replace(" ", "T"));
   if (!Number.isNaN(t0)) days = Math.max(1, Math.ceil((Date.now() - t0) / 86400000));
-  // 代表作：获赞最高的（至少 2 件作品且有人点赞才摆出来，免得和墙重复）
-  const master = list.length >= 2 ? list.reduce((a, b) => (b.likes_count > a.likes_count ? b : a)) : null;
-  const showMaster = master && master.likes_count > 0 ? master : null;
-  const rest = showMaster ? list.filter((w) => w.id !== showMaster.id) : list;
-  // 标签小结：聚合 TA 作品的标签
+  // 代表作展示全部精选作品；标签由服务端基于全部公开作品计算，避免只统计首屏
+  const featured = featuredWorks(workPage);
+  const featuredIds = new Set(featured.map((w) => Number(w.id)));
+  const rest = list.filter((w) => !featuredIds.has(Number(w.id)));
   const tagCount = new Map();
   for (const w of list) {
     try {
@@ -108,7 +208,10 @@ export function pageUser(u, stats, works, pet = null) {
       /* 坏标签跳过 */
     }
   }
-  const topTags = [...tagCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const topTags = (Array.isArray(workPage?.top_tags) && workPage.top_tags.length
+    ? workPage.top_tags
+    : [...tagCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5))
+    .map((entry) => Array.isArray(entry) ? entry : [entry.tag, entry.n]);
   return `
     <main class="wrap">
       <h1 class="px-title me-title"><span>用户 ${esc(u.nickname)} 的主页</span>${statChips(u.is_admin)}</h1>
@@ -125,19 +228,16 @@ export function pageUser(u, stats, works, pet = null) {
           ${petRunHtml(pet)}
         </div>
       </div>
-      ${showMaster ? `
+      ${featured.length ? `
       <h2 class="px-title px-title--sub">代表作</h2>
-      <div class="px-card master-card">
-        <a href="#/art/${showMaster.id}"><img src="${showMaster.png_url}" alt="${esc(showMaster.title)}" loading="lazy"></a>
-        <div class="stack">
-          <span><span class="px-badge" style="background:var(--gold)">热度最高的作品</span></span>
-          <b><a href="#/art/${showMaster.id}" style="color:inherit;text-decoration:none">${esc(showMaster.title)}</a></b>
-          <span class="hint">浏览 ${showMaster.views} · 点赞 ${showMaster.likes_count} · 评论 ${showMaster.comments_count}</span>
-        </div>
-      </div>` : ""}
+      <div class="art-grid me-wall">${featured.map((a) => artCard(a, viewer)).join("")}</div>` : ""}
       <h2 class="px-title px-title--sub">作品墙</h2>
-      ${rest?.length ? `<div class="art-grid me-wall">${rest.map(artCard).join("")}</div>` : `
-      <div class="px-card empty-wall">还没有作品</div>`}
+      ${rest.length
+        ? `<div class="art-grid me-wall" id="profile-works" data-uid="${u.id}" data-viewer="${viewer ? 1 : 0}">${rest.map((a) => artCard(a, viewer)).join("")}</div>`
+        : `<div class="art-grid me-wall" id="profile-works" data-uid="${u.id}" data-viewer="${viewer ? 1 : 0}">${workPage?.has_more
+            ? `<p class="hint">读取中…</p>`
+            : `<div class="px-card empty-wall">${featured.length ? "暂无其他作品" : "还没有作品"}</div>`}</div>`}
+      <p class="hint" id="profile-wall-end"${workPage?.has_more ? " hidden" : ""}>到底啦</p>
     </main>`;
 }
 

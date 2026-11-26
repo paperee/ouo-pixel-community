@@ -634,7 +634,7 @@ textarea.px-input {
 }
 
 .admin-tabs {
-  margin: 16px 0 4px;
+  margin: 20px 0 4px;
 }
 
 .admin-sec-hint {
@@ -661,7 +661,12 @@ textarea.px-input {
   margin-top: 2px;
 }
 
-/* 后台列表行：段落收紧、行距统一，按钮列垂直居中不挤压 */
+/* 后台列表行：与消息通知卡片保持相同的按钮留白与列间距 */
+.admin-sec .draft-row {
+  gap: 10px;
+  padding: 16px;
+}
+
 .admin-sec .draft-row p {
   margin: 4px 0 0;
 }
@@ -1454,24 +1459,6 @@ a:not(.px-btn):not(.author-chip):not(.author-link):not(.logo):not(.px-title):not
   white-space: nowrap;
 }
 
-/* 他人主页代表作：大图 + 信息横排 */
-.master-card {
-  display: flex;
-  gap: 24px;
-  align-items: center;
-}
-.master-card img {
-  width: 110px;
-  height: auto;
-  max-height: none;
-  object-fit: contain;
-  image-rendering: pixelated;
-  border: 2px solid var(--edge);
-  border-radius: var(--radius-sm);
-  background: repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 0 / 16px 16px;
-  flex-shrink: 0;
-}
-
 /* 我的主页：从作品选头像 */
 .avatar-pick {
   display: grid;
@@ -1555,8 +1542,9 @@ a:not(.px-btn):not(.author-chip):not(.author-link):not(.logo):not(.px-title):not
   margin-top: 8px;
 }
 
-/* 画廊到底提示：与网格留出呼吸距离并居中 */
-#gallery-end {
+/* 画廊与个人主页到底提示：与网格留出呼吸距离并居中 */
+#gallery-end,
+#profile-wall-end {
   margin: 20px 0 8px;
   text-align: center;
 }

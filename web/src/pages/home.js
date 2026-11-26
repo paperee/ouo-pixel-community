@@ -57,7 +57,7 @@ export function artCard(a, viewer = false) {
       <b><a href="#/art/${a.id}" class="ellipsis-1" style="color:inherit;text-decoration:none" title="${esc(a.title)}">${esc(a.title)}</a></b>
       <span class="art-meta">
         <span class="hint">${viewer ? `浏览 ${a.views} · 评论 ${a.comments_count}` : `浏览 ${a.views} · 点赞 ${a.likes_count} · 评论 ${a.comments_count}`}</span>
-        ${viewer ? `<button class="like-mini${a.liked ? " on" : ""}" data-like="${a.id}" title="${a.liked ? "取消点赞" : "点赞"}">${nIcon("thumb")}<b data-like-n>${a.likes_count}</b></button>` : ""}
+        ${viewer ? `<button class="like-mini${a.liked ? " on" : ""}" data-like="${a.id}" title="${a.liked ? "取消点赞" : "点赞"}" aria-pressed="${a.liked ? "true" : "false"}">${nIcon("thumb")}<b data-like-n>${a.likes_count}</b></button>` : ""}
       </span>
     </div>`;
 }
@@ -300,13 +300,17 @@ export function wireGalleryLikes() {
       return;
     }
     if (r.status !== 200 && r.status !== 201) return;
-    b.classList.toggle("on", r.data.liked);
-    b.title = r.data.liked ? "取消点赞" : "点赞";
-    const n = b.querySelector("[data-like-n]");
-    if (n) n.textContent = r.data.likes_count;
+    const liked = !!r.data.liked;
+    document.querySelectorAll(`[data-like="${b.dataset.like}"]`).forEach((btn) => {
+      btn.classList.toggle("on", liked);
+      btn.title = liked ? "取消点赞" : "点赞";
+      btn.setAttribute("aria-pressed", String(liked));
+      const n = btn.querySelector("[data-like-n]");
+      if (n) n.textContent = r.data.likes_count;
+    });
     // 点赞成功弹一下（复用详情页的摇动动画，连点可重复触发）
     b.classList.remove("liked-pop");
-    if (r.data.liked) {
+    if (liked) {
       void b.offsetWidth;
       b.classList.add("liked-pop");
     }

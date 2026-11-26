@@ -343,15 +343,56 @@ artworksRouter.post("/artworks/:id/remix", requireLogin, rateLimit({ windowMs: 6
   res.status(201).json({ draft });
 });
 
-// ---- 某人的公开作品 ----
+// ---- 某人的公开作品：服务端分页 + 当前访客点赞状态 ----
 artworksRouter.get("/users/:uid/works", (req, res) => {
-  const items = db
+  const uid = Number(req.params.uid);
+  const limit = Math.min(24, Math.max(1, Number(req.query.limit) || 12));
+  const total = db
+    .prepare("SELECT COUNT(*) c FROM artworks WHERE author_id = ? AND status IN ('normal', 'featured')")
+    .get(uid).c;
+  const pages = Math.max(1, Math.ceil(total / limit));
+  const page = Math.min(Math.max(1, Number(req.query.page) || 1), pages);
+  const cols = `a.id, a.title, a.png_url, a.width, a.height, a.tags, a.status, a.likes_count,
+    a.comments_count, a.views, a.created_at,
+    EXISTS(SELECT 1 FROM likes l WHERE l.user_id = ? AND l.artwork_id = a.id) AS liked`;
+  const rows = db
     .prepare(
-      `SELECT id, title, png_url, width, height, tags, likes_count, comments_count, views, created_at
-       FROM artworks WHERE author_id = ? AND status IN ('normal', 'featured') ORDER BY id DESC LIMIT 24`
+      `SELECT ${cols}
+       FROM artworks a
+       WHERE a.author_id = ? AND a.status IN ('normal', 'featured')
+       ORDER BY a.id DESC LIMIT ? OFFSET ?`
     )
-    .all(Number(req.params.uid));
-  res.json({ items });
+    .all(req.session.userId || 0, uid, limit + 1, (page - 1) * limit);
+  let featured = [];
+  let top_tags = [];
+  if (page === 1) {
+    featured = db
+      .prepare(
+        `SELECT ${cols}
+         FROM artworks a
+         WHERE a.author_id = ? AND a.status = 'featured'
+         ORDER BY a.likes_count DESC, a.id DESC`
+      )
+      .all(req.session.userId || 0, uid);
+    top_tags = db
+      .prepare(
+        `SELECT j.value AS tag, COUNT(*) AS n
+         FROM artworks a, json_each(CASE WHEN json_valid(a.tags) THEN a.tags ELSE '[]' END) j
+         WHERE a.author_id = ? AND a.status IN ('normal', 'featured')
+         GROUP BY j.value ORDER BY n DESC, j.value ASC LIMIT 5`
+      )
+      .all(uid);
+  }
+  res.json({
+    items: rows.slice(0, limit),
+    page,
+    pages,
+    total,
+    has_more: rows.length > limit,
+    master: featured[0] || null,
+    featured,
+    top_tags,
+  });
 });
 
 // ---- 自己全部作品（含待审/下架） ----

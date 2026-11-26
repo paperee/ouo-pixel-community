@@ -6,7 +6,7 @@ import { ADMIN_LIST_PER_PAGE, getAdminArtworkPage } from "./admin-pagination.js"
 import { getPagerKeyboardPage } from "./pagination-keyboard.js";
 
 const ADMIN_TABS = [
-  ["review", "审核"],
+  ["review", "作品审核"],
   ["artworks", "作品管理"],
   ["users", "用户管理"],
   ["logs", "操作日志"],
@@ -67,9 +67,6 @@ export async function mountAdmin() {
       <div id="admin-artworks" class="stack"><p class="hint">读取中…</p></div>
     </section>
     <section class="admin-sec" data-asec="users" hidden>
-      <h3 class="admin-sub">管理员</h3>
-      <div id="admin-admins" class="stack"><p class="hint">读取中…</p></div>
-      <h3 class="admin-sub">注册用户</h3>
       <div class="row admin-section-head">
         <p class="hint admin-sec-hint">封禁后对方无法登录和任何操作；不能封管理员。</p>
         <form id="admin-user-search" class="row admin-search">
@@ -82,6 +79,9 @@ export async function mountAdmin() {
           <button class="px-btn px-btn--sm">搜索</button>
         </form>
       </div>
+      <h3 class="admin-sub">管理员</h3>
+      <div id="admin-admins" class="stack"><p class="hint">读取中…</p></div>
+      <h3 class="admin-sub">注册用户</h3>
       <div id="admin-users" class="stack"><p class="hint">读取中…</p></div>
     </section>
     <section class="admin-sec" data-asec="logs" hidden>

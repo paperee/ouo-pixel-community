@@ -501,6 +501,29 @@ const server = app.listen(0, async () => {
   check("edit-sensitive-notif", (r.json.items || []).some((x) => x.type === "system" && String(x.extra || "").includes("待审")));
   r = await req("PATCH", `/api/admin/${aid2b}`, JSON.stringify({ status: "normal" }));
   check("edit-sensitive-restore", r.status === 200);
+  r = await req("PATCH", `/api/admin/${aid2b}`, JSON.stringify({ status: "featured" }));
+  check("profile-featured-seed", r.status === 200);
+  r = await req("PATCH", `/api/admin/${permId}`, JSON.stringify({ status: "featured" }));
+  check("profile-featured-seed-2", r.status === 200);
+
+  // ---- 个人主页作品墙：服务端分页与全量统计 ----
+  const profilePage1 = await req("GET", `/api/users/${meId}/works?limit=2&page=1`);
+  const profilePage2 = await req("GET", `/api/users/${meId}/works?limit=2&page=2`);
+  check("profile-works-page-1", profilePage1.status === 200 && profilePage1.json.items.length === 2 &&
+    profilePage1.json.page === 1 && profilePage1.json.has_more === true);
+  check("profile-works-page-2", profilePage2.status === 200 && profilePage2.json.items.length === 2 &&
+    profilePage2.json.page === 2 && profilePage2.json.total === profilePage1.json.total);
+  check("profile-works-page-no-overlap", !profilePage2.json.items.some((w) =>
+    profilePage1.json.items.some((first) => first.id === w.id)));
+  check("profile-works-summary", profilePage1.json.master?.id === profilePage1.json.featured?.[0]?.id &&
+    profilePage1.json.master?.status === "featured" &&
+    profilePage1.json.featured?.length === 2 && profilePage1.json.featured.every((w) => w.status === "featured") &&
+    profilePage1.json.featured.some((w) => w.id === aid2b) && profilePage1.json.featured.some((w) => w.id === permId) &&
+    Array.isArray(profilePage1.json.top_tags) && profilePage1.json.top_tags.some((t) => t.tag === "场景"));
+  r = await req("GET", `/api/users/${bid}/works`);
+  check("profile-works-no-featured", r.status === 200 && r.json.master === null && r.json.featured?.length === 0);
+  check("profile-works-order", profilePage1.json.items.every((w, i, list) =>
+    i === 0 || list[i - 1].id > w.id));
 
   // ---- 点赞评论通知 ----
   r = await req("POST", `/api/artworks/${aid}/like`);
@@ -512,6 +535,9 @@ const server = app.listen(0, async () => {
   r = await req("POST", "/api/login", JSON.stringify({ email: "b@c.cn", password: "secret12" }));
   r = await req("POST", `/api/artworks/${aid}/like`);
   check("like-other", r.status === 201 && r.json.likes_count === 2);
+  r = await req("GET", `/api/users/${meId}/works?limit=24`);
+  check("profile-works-viewer-liked", r.status === 200 && Number(r.json.items.find((w) => w.id === aid)?.liked) === 1 &&
+    Number(r.json.items.find((w) => w.id === aid2b)?.liked) === 0);
   r = await req("POST", `/api/artworks/${aid}/comments`, JSON.stringify({ content: "@新名字 好看！" }));
   check("comment-mention", r.status === 201);
   const cid = r.json.comment?.id;

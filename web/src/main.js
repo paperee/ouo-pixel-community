@@ -11,7 +11,7 @@ import { initPixelTips } from "./tooltip.js";
 import { uiAlert, uiNotice } from "./dialog.js";
 import { layoutArtGrid, loadGallery, mountHomeEdge, pageHome, wireArtGrids, wireGalleryInfinite, wireGalleryLikes, wireGalleryTabs, wireHomeEgg } from "./pages/home.js";
 import { pageAuth, wireAuthForm } from "./pages/auth.js";
-import { pageMe, pageUser, wireMePage } from "./pages/me.js";
+import { mountProfileWall, pageMe, pageUser, profileFeaturedIds, wireMePage, wireProfileInfinite } from "./pages/me.js";
 import { loadDrafts, loadPublished, wireDrafts } from "./pages/drafts.js";
 import { wireDraftPreview } from "./pages/preview.js";
 import { mountArt } from "./pages/art.js";
@@ -130,16 +130,18 @@ async function render() {
     const candidates = (mr.status === 200 ? mr.data.items : [])
       .filter((w) => ["normal", "featured"].includes(w.status))
       .map((w) => ({ id: w.id, kind: "artwork", title: w.title, png_url: w.png_url, status: w.status }));
+    const workPage = wr.status === 200 && wr.data ? wr.data : { items: [], has_more: false };
     app.innerHTML =
       nav(user) +
       pageMe(
         user,
         data.stats,
-        wr.status === 200 ? wr.data.items : [],
+        workPage,
         candidates,
         data.pet?.kind === "artwork" ? data.pet : null
       );
     document.querySelectorAll(".art-grid").forEach((box) => layoutArtGrid(box));
+    mountProfileWall(user.id, true, workPage, profileFeaturedIds(workPage));
   } else if (hash.startsWith("#/draw")) {
     // 绘画软件式三栏全幅（去掉网页左右内边距）
     app.innerHTML = nav(user) + `<div class="draw-page"><div id="draw-root"></div></div>`;
@@ -301,9 +303,20 @@ async function render() {
         root.innerHTML = `<div class="px-card">用户不存在或已注销。</div>`;
         return;
       }
-      const html = pageUser(ur.data.user, ur.data.stats, wr.status === 200 ? wr.data.items : [], ur.data.pet?.kind === "artwork" ? ur.data.pet : null);
+      const workPage = wr.status === 200 && wr.data ? wr.data : { items: [], has_more: false };
+      const html = pageUser(
+        ur.data.user,
+        ur.data.stats,
+        workPage,
+        ur.data.pet?.kind === "artwork" ? ur.data.pet : null,
+        !!user
+      );
       root.innerHTML = html.replace(/^\s*<main[^>]*>/, "").replace(/<\/main>\s*$/, "");
       document.querySelectorAll(".art-grid").forEach((box) => layoutArtGrid(box));
+      mountProfileWall(uid, !!user, workPage, profileFeaturedIds(workPage));
+      wireArtGrids();
+      wireProfileInfinite();
+      wireGalleryLikes();
       wireDraftPreview();
       wirePet();
     })();
@@ -354,6 +367,7 @@ async function render() {
   wireArtGrids();
   wireGalleryTabs();
   wireGalleryInfinite();
+  wireProfileInfinite();
   wireGalleryLikes();
   loadGallery(false);
   wireDraftPreview();
